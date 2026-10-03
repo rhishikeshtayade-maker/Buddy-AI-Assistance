@@ -109,3 +109,44 @@ Every tool request, permission decision, confirmation prompt, authentication att
   - `MODERATE`: save, rename, submit (Moderate risk, confirmation required)
   - `DANGEROUS`: delete, uninstall, format, drop, kill (High risk, explicit confirmation required)
   - `CRITICAL`: security settings, credentials, privilege escalation (Critical risk, local PIN authentication + confirmation required)
+
+---
+
+## 10. Agentic Task Planning & Multi-Step Security (Loop 7)
+
+### Zero Direct Execution Authority
+- The AI Task Planner operates exclusively inside a prompt sandbox with no direct execution authority.
+- The planner cannot execute Python `eval()` or `exec()`, run PowerShell/cmd/bash, spawn subprocesses, or invoke Windows APIs directly.
+- The planner's only output is a structured JSON plan specifying registered tool names and arguments.
+
+### Immutable Risk Tiers & Permission Gates
+- The planner cannot declare or downgrade risk tiers.
+- Risk levels (`SAFE`, `LOW`, `MODERATE`, `HIGH`, `CRITICAL`), confirmation requirements, and authentication requirements are synchronized strictly from registered `ToolDefinition` objects in `ToolRegistry`.
+- A plan is never permission. Even if a user asks for a multi-step workflow, each dangerous step must independently pass `PermissionEngine`, `ConfirmationManager`, and local authentication gates before execution.
+
+### DAG Dependency Validation
+- Plan dependencies are validated as a Directed Acyclic Graph before execution.
+- Circular dependencies and self-dependencies are rejected immediately.
+- If a prerequisite step fails, all dependent steps are immediately marked `SKIPPED` with `DEPENDENCY_FAILED`.
+
+### Failure Handling & Non-Retryable Boundaries
+- Step failures are strictly classified:
+  - `TRANSIENT`: Network or temporary timeouts (eligible for bounded retry, max 2).
+  - `PERMISSION_DENIED`: Categorically non-retryable (stops task).
+  - `CONFIRMATION_REQUIRED`: Pauses task for user confirmation token.
+  - `AUTHENTICATION_REQUIRED`: Pauses task for local user authentication.
+  - `SECURITY_BLOCKED`: Categorically non-retryable (stops task immediately).
+  - `TARGET_NOT_FOUND` / `SCREEN_CHANGED`: Halts step, captures fresh visual state, and triggers adaptive re-planning (max 2 replans).
+
+### Runaway Loop & Storm Protections
+- `max_task_steps = 20`: Plans with more than 20 steps are rejected before execution begins.
+- `max_tool_calls_per_task = 30`: Prevents infinite retry/replanning loops or tool storms.
+- `execution_timeout = 180s`: Bound on total execution duration.
+
+### Untrusted Tool Result Boundary
+- Tool outputs are treated as untrusted data.
+- Tool outputs are wrapped and sanitized; they can never define new tools, inject shell commands, or alter system security policies.
+
+### Human In-The-Loop Control
+- The user can issue a cancellation command (`cancel_task()`) at any time.
+- The executor aborts future steps immediately, ensuring that no further actions commence after cancellation.

@@ -31,8 +31,8 @@ BUDDY is developed using strict **Loop Engineering**:
 - [x] **LOOP 4**: Secure Tool System & Computer Control (Permission Engine, Risk 0-4, Confirmation tokens, PathPolicy, Allowlisted Apps, Sandboxed Filesystem, Empirical Verification)
 - [x] **LOOP 5**: Screen Understanding + Controlled Computer Vision (Bounding boxes, VisionTarget, ScreenManager state fingerprinting)
 - [x] **LOOP 6**: Controlled Mouse & Keyboard Interaction (Target-bound clicks, keyboard allowlist, stale-screen protection, sensitive text defense, zero coordinate injection)
-- [ ] **LOOP 7**: Advanced Agentic Task Planning + Multi-Step Execution
-- [ ] **LOOP 8**: Agentic Task Planner & Step Decomposition
+- [x] **LOOP 7**: Advanced Agentic Task Planning + Multi-Step Execution (Restricted prompt planner, DAG dependency validator, bounded retries, adaptive re-planning, per-step confirmation/auth gating, anti-runaway boundaries)
+- [ ] **LOOP 8**: Long-Term Memory + Contextual Personalization
 - [ ] **LOOP 9**: Verification Engine (Post-action state confirmation)
 - [ ] **LOOP 10**: Memory System (Short-term & Long-term semantic store)
 - [ ] **LOOP 11**: Encrypted Storage (AES-256-GCM Vault)

@@ -135,3 +135,24 @@ Every tool request emits structured audit records to `data/audit.log` and standa
 - `InteractionRequest`: Strictly bound instruction with verified `(x, y)` coordinates, `target_id`, `screen_fingerprint`, and bounds validation.
 - Direct raw coordinate injection without a verified target is strictly prohibited.
 - Typed text is never persisted or logged in audit records or event payloads.
+
+---
+
+## 8. Agentic Task Planning & Multi-Step Execution (Loop 7)
+
+### Agent Core Modules (`app.agent`)
+| Component | Module | Responsibility |
+|---|---|---|
+| `TaskPlanner` | `app.agent.planner` | Decomposes high-level natural language user goals into structured `Task` models using restricted prompts. Never executes code. |
+| `TaskPlanValidator` | `app.agent.validator` | Validates step limits, DAG dependency cycles, tool existence, argument injection patterns, and synchronizes risk tiers from `ToolRegistry`. |
+| `TaskExecutor` | `app.agent.executor` | Sequentially executes steps through `ToolExecutor`, pauses for confirmation/auth, executes bounded retries, and triggers adaptive re-planning. |
+| `AgentService` | `app.agent.service` | High-level facade tying planning, validation, execution, state machine transitions, and EventBus lifecycle events together. |
+| `TaskContext` | `app.agent.context` | Ephemeral, privacy-sanitized execution state (active applications, screen fingerprints, discovered targets, completed step records). |
+
+### Multi-Step Execution Lifecycle
+1. **Planning**: `AgentService.plan_goal(goal)` -> `TaskPlanner.plan(goal, context)`
+2. **Validation**: `TaskPlanValidator.validate_plan(task)` (Enforces DAG dependencies, rejects forbidden tools, syncs risk levels)
+3. **Execution**: `TaskExecutor.execute_task(task, confirmation_token, auth_credential)`
+4. **Step Gating**: Every step independently passes `PermissionEngine`, `ConfirmationManager`, and `Authenticator`.
+5. **Adaptive Recovery**: When `SCREEN_CHANGED` or `TARGET_NOT_FOUND` occurs, the executor triggers re-planning (up to 2 times).
+6. **Verification**: Only steps with `verified=True` are counted toward success. Missing targets stop the task honestly without false success claims.

@@ -108,5 +108,9 @@ class VerificationError(ToolExecutionError):
     """Raised when post-execution verification fails to empirically confirm expected system state."""
 
 
+class ValidationError(BuddyError):
+    """Raised when structured input, plan, or configuration fails validation."""
+
+
 # Compatibility alias
 RegistryError = ServiceRegistryError

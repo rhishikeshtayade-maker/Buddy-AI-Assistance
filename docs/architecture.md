@@ -399,3 +399,62 @@ BUDDY implements a secure, provider-independent tool execution framework that al
 4. **Restricted Keyboard Allowlist**: Only explicit safe navigation keys (`ENTER`, `ESC`, `TAB`, `SPACE`, arrow keys, etc.) are allowed. Arbitrary OS shortcut combos are rejected.
 5. **Zero Credential / Password Typing**: Automatic typing of passwords, OTPs, API keys, or security tokens is strictly forbidden and fails closed. Typed text is never persisted or logged in audit records.
 6. **Narrow Native APIs**: Uses low-level Windows User32 APIs via `ctypes` (`SetCursorPos`, `mouse_event`, `keybd_event`) without third-party automation dependencies like PyAutoGUI.
+
+---
+
+## 10. Loop 7 Advanced Agentic Task Planning & Multi-Step Execution Architecture
+
+```text
+       USER GOAL
+          │
+          ▼
+     TASK PLANNER (restricted prompt sandbox, structured output only)
+          │
+          ▼
+      TASK PLAN (strongly-typed Task & TaskStep models)
+          │
+          ▼
+    PLAN VALIDATOR (DAG cycle check, schema check, max_steps, risk synchronization)
+          │
+          ▼
+    STEP EXECUTOR (sequential loop, bounded retries, adaptive replanning)
+          │
+          ▼
+   PERMISSION ENGINE (per-step authorization against ToolDefinition)
+          │
+          ▼
+ CONFIRMATION / AUTH (per-action gating; plan approval is NOT step permission)
+          │
+          ▼
+   REGISTERED TOOL (sandboxed tools from ToolRegistry)
+          │
+          ▼
+      EXECUTION (isolated tool execution via ToolExecutor)
+          │
+          ▼
+    VERIFICATION (empirical system state inspection)
+          │
+          ▼
+     STEP RESULT (ToolResult with success, verified, latency)
+          │
+          ▼
+     TASK CONTEXT (ephemeral state tracking: active apps, fingerprints, targets)
+          │
+          ▼
+  NEXT STEP / REPLAN (evaluate environment changes, abort or adapt)
+          │
+          ▼
+ FINAL VERIFIED RESULT (only empirically verified outcomes reported)
+```
+
+### Non-Negotiable Core Principles of Loop 7:
+1. **Zero Direct Execution Authority**: The Task Planner never executes actions directly, never runs Python `eval()` or `exec()`, never launches subprocesses, and never touches shell or OS APIs.
+2. **Immutability of Risk Levels**: The AI cannot assign or downgrade its own risk levels. Risk tiers and confirmation requirements originate exclusively from registered `ToolDefinition` contracts in the `ToolRegistry`.
+3. **Per-Action Authorization Boundary**: A plan is not permission. Approving a plan does not bypass step-level confirmation or authentication. Each dangerous step must independently pass the security boundary.
+4. **DAG Dependency Validation**: Step dependencies are validated as a Directed Acyclic Graph before execution. Circular dependencies are rejected immediately. If a prerequisite step fails, dependent steps are marked `SKIPPED`.
+5. **Bounded Retries**: Transient failures (e.g. temporary timeouts) are retried at most 2 times. Security blocks, permission denials, confirmation requirements, and invalid arguments are categorically non-retryable.
+6. **Adaptive Re-planning**: If the visual screen fingerprint changes or a target disappears (`SCREEN_CHANGED` / `TARGET_NOT_FOUND`), the executor halts the step, captures fresh state, and re-plans adaptively.
+7. **Anti-Runaway Protection**: Execution is constrained by strict boundaries: `max_task_steps = 20`, `max_tool_calls_per_task = 30`, and timeouts on planning and execution.
+8. **Instant Human Cancellation**: Users can cancel a running task at any moment (`cancel_task()`). The executor immediately halts scheduling and prevents any further actions from beginning.
+9. **Untrusted Tool Result Boundary**: Tool outputs are untrusted external data and are wrapped/sanitized; tool results can never create tools, alter policies, or grant permissions.
+10. **Sanitized Persistence & Audit**: Audit logs record step metadata, permission decisions, and verification status. Passwords, secrets, sensitive typed text, and raw screenshots are strictly excluded from logs and task context.

@@ -118,3 +118,24 @@ pytest tests/security/test_interaction_security.py -v
 # Run mouse and keyboard unit tests
 pytest tests/unit/test_mouse_tools.py tests/unit/test_keyboard_tools.py tests/unit/test_interaction_policy.py -v
 ```
+
+---
+
+## 9. Agentic Task Planning & Multi-Step Execution Testing (Loop 7)
+
+```powershell
+# Run the real Windows multi-step planning smoke test (Notepad open -> focus -> type -> confirm -> finish)
+python -m app.agent.smoke_test_agent
+
+# Run in deterministic mock / headless mode (suitable for CI)
+python -m app.agent.smoke_test_agent --mock
+
+# Run agent unit tests (models, planner, validator, executor, policies)
+pytest tests/unit/test_agent_models.py tests/unit/test_agent_planner.py tests/unit/test_agent_validator.py tests/unit/test_agent_executor.py tests/unit/test_agent_policies.py -v
+
+# Run agent security tests (adversarial plan rejection, risk tampering, forbidden tool blocks)
+pytest tests/security/test_agent_security.py -v
+
+# Run agent end-to-end tests (multi-step sequence & partial failure honesty)
+pytest tests/e2e/test_agent_e2e.py -v
+```
