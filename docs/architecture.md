@@ -271,5 +271,79 @@ BUDDY incorporates a provider-agnostic, security-bounded conversational reasonin
 7. **Developer CLI Chat Mode (`app/ai/chat.py`)**:
    - Interactive terminal testing harness (`python -m app.ai.chat`) enabling rapid prompt iteration without microphone hardware.
 
+---
 
+## 8. Loop 4 Secure Tool System & Computer Control Architecture (Implemented)
 
+BUDDY implements a secure, provider-independent tool execution framework that allows the AI layer to request controlled computer actions while enforcing strict policy gating and verification:
+
+```text
+       User / Voice
+            │
+            ▼
+    ConversationManager
+            │
+            ▼
+        AI Provider
+            │ (tool_calls)
+            ▼
+       ToolRequest
+            │
+            ▼
+       ToolRegistry (Lookup ToolDefinition)
+            │
+            ▼
+     PermissionEngine ───► Authentication / Confirmation Boundary
+            │
+            ▼
+      Tool Execution (Bounded Timeout, asyncio.wait_for)
+            │
+            ▼
+     State Verification (Empirical system state inspection)
+            │
+            ▼
+        ToolResult (success=verified, verified=True)
+            │
+            ▼
+    ConversationManager (TOOL message: wrap_untrusted_content)
+            │
+            ▼
+        AI Provider (Final synthesized answer)
+```
+
+### Key Components:
+
+1. **Tool Models (`app/tools/models.py`)**:
+   - `ToolRiskLevel` (0=SAFE, 1=LOW, 2=MODERATE, 3=HIGH, 4=CRITICAL).
+   - `ToolPermissionLevel` (`NONE`, `SESSION`, `CONFIRM`, `AUTHENTICATE`).
+   - Strongly typed `ToolDefinition`, `ToolRequest`, `ToolResult`, and `ToolExecutionStatus`.
+
+2. **Tool Registry (`app/tools/registry.py`)**:
+   - Thread-safe registry preventing duplicate registration and ensuring only trusted application code registers tools.
+   - Unknown tools fail closed immediately.
+
+3. **Tool Interface (`app/tools/base.py`)**:
+   - Abstract base class requiring `validate_input()`, `execute()`, and empirical `verify()`.
+   - Execution alone does NOT imply success; verification is mandatory.
+
+4. **Permission Engine (`app/security/permissions.py`)**:
+   - Risk derived solely from immutable `ToolDefinition`, immune to AI argument or prompt manipulation.
+   - Evaluates mandatory confirmation and authentication gates.
+
+5. **Confirmation & Authentication Boundaries (`app/security/confirmation.py` & `app/security/authentication.py`)**:
+   - Single-use, non-transferable cryptographic confirmation tokens tied to request ID and hashed arguments. Replay attacks and parameter tampering are rejected.
+   - Local authentication interface supporting salted PBKDF2 PIN verification.
+
+6. **Centralized Path Sandboxing (`app/security/path_policy.py`)**:
+   - Strictly confines file operations to authorized user roots (Documents, Downloads, Desktop).
+   - Rejects directory traversal (`../`), Windows device namespaces (`CON`, `PRN`, `NUL`), UNC paths (`\\server\share`), and protected files (`.env`, `.ssh`, certificates, credentials).
+
+7. **Registered Computer Control Tools (`app/tools/system.py`, `app/tools/applications.py`, `app/tools/filesystem.py`)**:
+   - System: `system.get_info`, `system.get_battery`, `system.get_volume`, `system.set_volume`.
+   - Applications: `app.list`, `app.open` (explicit allowlist: `notepad`, `calculator`, `paint`, `explorer`), `app.close` (requires confirmation).
+   - Filesystem: `file.search`, `file.read`, `file.create`, `file.rename`, `file.copy`, `file.move`.
+
+8. **AI Tool Integration & Output Sanitization (`app/ai/conversation.py`)**:
+   - Passes tool requests from AI response to `ToolExecutor`.
+   - Returns verified results as untrusted content wrapped in `<untrusted_external_content>` to defend against prompt injection.
+   - Updates state machine: `IDLE` -> `THINKING` -> `EXECUTING` -> `THINKING` -> `SPEAKING` -> `IDLE`.

@@ -70,3 +70,43 @@ class HealthCheckError(BuddyError):
 
 class LifecycleError(BuddyError):
     """Raised when application lifecycle violates sequential ordering or fails to start."""
+
+
+class SecurityError(BuddyError):
+    """Base exception for security boundary violations."""
+
+
+class PathSecurityError(SecurityError):
+    """Raised when a file or directory path violates path policy constraints."""
+
+
+class PermissionDeniedError(SecurityError):
+    """Raised when an operation is rejected by the permission engine."""
+
+
+class ConfirmationError(SecurityError):
+    """Raised when a confirmation token is invalid, expired, mismatched, or replayed."""
+
+
+class AuthenticationError(SecurityError):
+    """Raised when authentication challenge fails or is required."""
+
+
+class ToolExecutionError(BuddyError):
+    """Raised when tool execution encounters an error."""
+
+
+class ToolNotFoundError(BuddyError):
+    """Raised when attempting to execute an unregistered tool."""
+
+
+class ToolTimeoutError(ToolExecutionError):
+    """Raised when a tool execution exceeds its configured timeout."""
+
+
+class VerificationError(ToolExecutionError):
+    """Raised when post-execution verification fails to empirically confirm expected system state."""
+
+
+# Compatibility alias
+RegistryError = ServiceRegistryError

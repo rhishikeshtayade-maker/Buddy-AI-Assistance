@@ -84,6 +84,7 @@ class MockAIProvider(AIProvider):
         self.latency = latency
         self.simulate_failure = simulate_failure
         self.failure_exception = failure_exception
+        self.next_tool_calls: Optional[List[Dict[str, Any]]] = None
         self.call_count = 0
         self.last_messages: List[ChatMessage] = []
 
@@ -98,6 +99,10 @@ class MockAIProvider(AIProvider):
     def set_next_response(self, response: str) -> None:
         """Queue a specific text response for the next turn."""
         self.default_response = response
+
+    def set_next_tool_calls(self, tool_calls: List[Dict[str, Any]]) -> None:
+        """Queue structured tool calls for the next generation turn."""
+        self.next_tool_calls = tool_calls
 
     async def generate(
         self,
@@ -122,18 +127,69 @@ class MockAIProvider(AIProvider):
             )
             raise err
 
+        # If explicit tool calls queued, emit them
+        if self.next_tool_calls is not None:
+            calls = self.next_tool_calls
+            self.next_tool_calls = None
+            return AIResponse(
+                content="",
+                finish_reason="tool_calls",
+                provider=self.provider_name,
+                model=model or self._model,
+                tool_calls=calls,
+                latency=time.perf_counter() - start_time,
+            )
+
         # Generate intelligent contextual mock reply for common prompts
         reply_content = self.default_response
         if messages:
-            last_text = messages[-1].content.strip().lower()
-            if "what can you do" in last_text:
-                reply_content = "I can assist you with system tasks, answer questions, and control computer operations safely."
-            elif "25 * 4" in last_text or "25 × 4" in last_text or "25*4" in last_text:
-                reply_content = "25 × 4 equals 100."
-            elif "joke" in last_text:
-                reply_content = "Why did the computer show up at work cold? Because it left its Windows open!"
-            elif "api" in last_text:
-                reply_content = "An API (Application Programming Interface) allows different software applications to communicate with each other."
+            last_msg = messages[-1]
+            if last_msg.role == MessageRole.TOOL:
+                if '"verified": true' in last_msg.content or '"success": true' in last_msg.content:
+                    reply_content = "I have completed your request and verified the action."
+                elif '"status": "confirmation_required"' in last_msg.content or "confirmation_token" in last_msg.content:
+                    reply_content = "This action requires your confirmation before I can proceed."
+                elif '"status": "authentication_required"' in last_msg.content:
+                    reply_content = "This action requires authentication before I can proceed."
+                else:
+                    reply_content = "I could not complete the operation because the tool execution or verification failed."
+            else:
+                last_text = last_msg.content.strip().lower()
+                if "what can you do" in last_text:
+                    reply_content = "I can assist you with system tasks, answer questions, and control computer operations safely."
+                elif "open notepad" in last_text:
+                    return AIResponse(
+                        content="",
+                        finish_reason="tool_calls",
+                        provider=self.provider_name,
+                        model=model or self._model,
+                        tool_calls=[{"tool_name": "app.open", "arguments": {"application": "notepad"}}],
+                        latency=time.perf_counter() - start_time,
+                    )
+                elif "get battery" in last_text or "battery" in last_text:
+                    return AIResponse(
+                        content="",
+                        finish_reason="tool_calls",
+                        provider=self.provider_name,
+                        model=model or self._model,
+                        tool_calls=[{"tool_name": "system.get_battery", "arguments": {}}],
+                        latency=time.perf_counter() - start_time,
+                    )
+                elif "system info" in last_text:
+                    return AIResponse(
+                        content="",
+                        finish_reason="tool_calls",
+                        provider=self.provider_name,
+                        model=model or self._model,
+                        tool_calls=[{"tool_name": "system.get_info", "arguments": {}}],
+                        latency=time.perf_counter() - start_time,
+                    )
+                elif "25 * 4" in last_text or "25 × 4" in last_text or "25*4" in last_text:
+                    reply_content = "25 × 4 equals 100."
+                elif "joke" in last_text:
+                    reply_content = "Why did the computer show up at work cold? Because it left its Windows open!"
+                elif "api" in last_text:
+                    reply_content = "An API (Application Programming Interface) allows different software applications to communicate with each other."
 
         elapsed = time.perf_counter() - start_time
         return AIResponse(

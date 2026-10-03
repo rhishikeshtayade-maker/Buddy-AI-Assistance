@@ -108,6 +108,23 @@ class BuddyConfig(BaseSettings):
         default="hey buddy",
         validation_alias="WAKE_WORD",
     )
+    # Tool Execution Settings (Loop 4)
+    tools_enabled: bool = Field(
+        default=True,
+        validation_alias="TOOLS_ENABLED",
+    )
+    tools_timeout: float = Field(
+        default=10.0,
+        validation_alias="TOOLS_TIMEOUT",
+    )
+    tools_max_per_turn: int = Field(
+        default=5,
+        validation_alias="TOOLS_MAX_PER_TURN",
+    )
+    tools_require_confirmation: bool = Field(
+        default=True,
+        validation_alias="TOOLS_REQUIRE_CONFIRMATION",
+    )
     # Voice Pipeline Settings (Loop 2)
     voice_enabled: bool = Field(
         default=True,
@@ -168,6 +185,10 @@ class BuddyConfig(BaseSettings):
             "BUDDY_AUDIT_LOG_PATH": "AUDIT_LOG_PATH",
             "BUDDY_MASTER_KEY_STORAGE": "MASTER_KEY_STORAGE",
             "BUDDY_WAKE_WORD": "WAKE_WORD",
+            "BUDDY_TOOLS_ENABLED": "TOOLS_ENABLED",
+            "BUDDY_TOOLS_TIMEOUT": "TOOLS_TIMEOUT",
+            "BUDDY_TOOLS_MAX_PER_TURN": "TOOLS_MAX_PER_TURN",
+            "BUDDY_TOOLS_REQUIRE_CONFIRMATION": "TOOLS_REQUIRE_CONFIRMATION",
             "BUDDY_VOICE_ENABLED": "VOICE_ENABLED",
             "BUDDY_AUDIO_INPUT_DEVICE": "AUDIO_INPUT_DEVICE",
             "BUDDY_AUDIO_OUTPUT_DEVICE": "AUDIO_OUTPUT_DEVICE",

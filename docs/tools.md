@@ -1,46 +1,119 @@
-# BUDDY Tool System Specification
+# BUDDY Tool System Specification (Loop 4)
 
-## 1. Tool Protocol Definition
+## 1. Tool Architecture
 
-Every capability in BUDDY is implemented as an isolated tool inheriting from `BaseTool`. Tools provide rigorous JSON Schema contracts, explicit risk definitions, and verification hooks.
+BUDDY implements a strictly sandboxed, permission-gated tool execution layer. The AI model never directly invokes operating system APIs, shells, or Python code.
 
-```python
-class BaseTool(ABC):
-    name: str
-    description: str
-    risk_level: RiskLevel
-    requires_confirmation: bool
-    requires_auth: bool
-    timeout_seconds: float = 10.0
-
-    @abstractmethod
-    async def execute(self, params: BaseModel) -> ToolResult:
-        ...
-
-    @abstractmethod
-    async def verify(self, params: BaseModel, result: ToolResult) -> bool:
-        ...
+```text
+       User / Voice
+            │
+            ▼
+    ConversationManager
+            │
+            ▼
+        AI Provider
+            │ (tool_calls)
+            ▼
+       ToolRequest
+            │
+            ▼
+       ToolRegistry (Lookup ToolDefinition)
+            │
+            ▼
+     PermissionEngine ───► Authentication / Confirmation Boundary
+            │
+            ▼
+      Tool Execution (Bounded Timeout, asyncio.wait_for)
+            │
+            ▼
+     State Verification (Empirical system state inspection)
+            │
+            ▼
+        ToolResult (success=verified, verified=True)
+            │
+            ▼
+    ConversationManager (TOOL message: wrap_untrusted_content)
+            │
+            ▼
+        AI Provider (Final synthesized answer)
 ```
+
+> **Fundamental Principle:**
+> **The AI may REQUEST a tool. The AI may NOT directly execute a tool.**
+> BUDDY never executes arbitrary AI-generated code, arbitrary shell commands, or arbitrary Python scripts.
 
 ---
 
-## 2. Core Tool Categories
+## 2. Core Tool Models
 
-1. **Applications (`app/tools/applications.py`)**:
-   - `open_application`: Launch validated application path or standard registered app name.
-   - `close_application`: Graceful or forced termination of target process.
-   - `list_running_applications`: Enumerate active desktop windows and processes.
+Located in `app/tools/models.py`:
 
-2. **Filesystem (`app/tools/filesystem.py`)**:
-   - Sandboxed path traversal checks (`assert_path_allowed`).
-   - `read_file`, `create_file`, `move_file`, `delete_file`.
-   - Protected path blocklist (`C:\Windows`, `C:\Recovery`, `.env`, system libraries).
+- **`ToolRiskLevel`**:
+  - `0 = SAFE`: Read-only queries with no local state change (e.g. system info, battery, volume query).
+  - `1 = LOW`: Minor non-destructive local interactions (e.g. launch allowlisted Notepad, create file).
+  - `2 = MODERATE`: State mutations requiring explicit user confirmation (e.g. rename file, move file, close application).
+  - `3 = HIGH`: Destructive or broad changes requiring two-step confirmation.
+  - `4 = CRITICAL`: System-wide alterations requiring authentication + explicit confirmation.
+- **`ToolPermissionLevel`**: `NONE`, `SESSION`, `CONFIRM`, `AUTHENTICATE`.
+- **`ToolDefinition`**: Immutable specification with input/output JSON schemas, risk tier, confirmation flag, and execution timeout.
+- **`ToolRequest`**: Unique request with request ID, target tool name, structured parameters, and originator.
+- **`ToolResult`**: Strongly typed execution outcome with `success`, `verified`, terminal `status`, `output`, `error`, and latency.
 
-3. **System Diagnostics (`app/tools/system.py`)**:
-   - `get_battery_status`, `get_cpu_ram_usage`, `get_storage_info`, `get_network_status`.
+---
 
-4. **Browser Controls (`app/tools/browser.py`)**:
-   - `open_url`, `search_web`, `extract_page_text`.
+## 3. Registered Safe Computer Control Tools
 
-5. **Developer Tools (`app/tools/developer.py`)**:
-   - Approved build/test commands within verified project directories.
+Every tool inherits from `Tool` (`app/tools/base.py`) and is registered in `ToolRegistry` (`app/tools/registry.py`).
+
+| Tool Identifier | Module | Risk Tier | Requires Confirmation | Description |
+|---|---|---|---|---|
+| `system.get_info` | `app.tools.system` | SAFE (0) | No | OS, architecture, Python version, CPU cores, RAM metrics. |
+| `system.get_battery` | `app.tools.system` | SAFE (0) | No | Battery percentage, charging status, time remaining. |
+| `system.get_volume` | `app.tools.system` | SAFE (0) | No | Current audio master volume level (0-100). |
+| `system.set_volume` | `app.tools.system` | LOW (1) | No | Bounded volume setting (0-100) with read-back verification. |
+| `app.list` | `app.tools.applications` | SAFE (0) | No | Safe running process list (name, PID, status). No tokens or env vars. |
+| `app.open` | `app.tools.applications` | LOW (1) | No | Launch allowlisted app (`notepad`, `calculator`, `paint`, `explorer`). |
+| `app.close` | `app.tools.applications` | MODERATE (2) | **Yes** | Graceful termination of allowlisted process with process check verification. |
+| `file.search` | `app.tools.filesystem` | LOW (1) | No | Search for files matching glob pattern inside authorized roots. |
+| `file.read` | `app.tools.filesystem` | LOW (1) | No | Read text content within authorized roots (1MB size bound). |
+| `file.create` | `app.tools.filesystem` | LOW (1) | No | Create new file with SHA-256 hash and size verification. |
+| `file.rename` | `app.tools.filesystem` | MODERATE (2) | **Yes** | Rename file with path validation on source and destination. |
+| `file.copy` | `app.tools.filesystem` | MODERATE (2) | **Yes** | Copy file within authorized roots with destination verification. |
+| `file.move` | `app.tools.filesystem` | MODERATE (2) | **Yes** | Move file within authorized roots with source removal verification. |
+
+---
+
+## 4. Path Security & Sandboxing (`PathPolicy`)
+
+Located in `app/security/path_policy.py`:
+
+- **Authorized Roots**: strictly constrained to user Documents, Downloads, Desktop (plus configurable test roots).
+- **Path Traversal Defense**: detects and blocks `..`, `../`, `..\`, mixed slashes, and relative escaping.
+- **Windows Device Path Defense**: blocks reserved device stems (`CON`, `PRN`, `AUX`, `NUL`, `COM1-9`, `LPT1-9`, `\\.\`, `\\?\`).
+- **UNC Path Defense**: blocks network shares (`\\server\share`).
+- **Protected File Defense**: blocks access to `.env`, `.ssh`, `.gnupg`, `.aws`, `.azure`, `.kube`, `.git`, private keys (`*.key`, `*.pem`), credentials, SAM, and browser databases.
+- **Symlink & Junction Defense**: resolves canonical path (`resolve()`) and asserts canonical target is within authorized root.
+
+---
+
+## 5. Verification Engine
+
+Execution alone does not equal success. Every tool implements `verify()`:
+- `app.open`: executes binary, then polls process table to empirically verify the process exists.
+- `app.close`: issues termination signal, then confirms the process has completely exited.
+- `file.create`: writes file, then reads bytes from disk to confirm existence, size, and SHA-256 digest match.
+- `system.set_volume`: adjusts level, then reads back actual volume to verify requested state was applied.
+
+If verification fails:
+- `ToolResult.success = False`
+- `ToolResult.verified = False`
+- `ToolResult.status = VERIFICATION_FAILED`
+- The AI is informed that verification failed and never reports false completion to the user.
+
+---
+
+## 6. Audit Logging
+
+Every tool request emits structured audit records to `data/audit.log` and standard logging:
+- Automatic masking of passwords, tokens, API keys, and sensitive parameters.
+- Audit trail includes: `timestamp`, `request_id`, `conversation_id`, `tool_name`, `risk_level`, `permission_decision`, `confirmation_decision`, `execution_status`, `verified`, `execution_latency`, `error_category`.

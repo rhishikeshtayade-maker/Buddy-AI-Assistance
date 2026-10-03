@@ -61,6 +61,24 @@ def redact_string(text: str) -> str:
     return scrubbed
 
 
+def redact_sensitive_data(data: Any) -> Any:
+    """Recursively scrub secrets from dict, list, or string data structures."""
+    if isinstance(data, str):
+        return redact_string(data)
+    elif isinstance(data, dict):
+        out: Dict[str, Any] = {}
+        sensitive_keys = ("key", "secret", "password", "token", "credential", "auth", "pin")
+        for k, v in data.items():
+            if any(s in str(k).lower() for s in sensitive_keys):
+                out[k] = REDACTED_MASK
+            else:
+                out[k] = redact_sensitive_data(v)
+        return out
+    elif isinstance(data, (list, tuple)):
+        return [redact_sensitive_data(item) for item in data]
+    return data
+
+
 class SecretRedactionFilter(logging.Filter):
     """Logging filter that redacts secrets and credentials from all record messages."""
 

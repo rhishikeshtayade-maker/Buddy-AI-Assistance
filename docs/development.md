@@ -74,15 +74,29 @@ python -m app.ai.chat
 ## 6. Running Tests
 
 ```powershell
-# Run all unit tests via pytest (includes all automated voice tests)
+# Run all unit tests via pytest
 pytest tests/unit
 
-# Or using standard unittest runner
-python -m unittest discover -s tests -v
-
-# Run security test suite
+# Run security test suite (path traversal, arbitrary execution defense, confirmation forgery)
 pytest tests/security
 
-# Run integration tests
-pytest tests/integration
+# Run end-to-end tool execution suite
+pytest tests/e2e
+
+# Run all tests using standard unittest runner
+python -m unittest discover -s tests -v
+```
+
+---
+
+## 7. Interactive Tool Execution Testing (CLI Chat)
+
+```powershell
+# Test tools and interactive confirmation prompts in CLI chat
+python -m app.ai.chat
+
+# Example tool prompts in chat:
+# You: Open Notepad
+# You: Get battery status
+# You: Get system info
 ```

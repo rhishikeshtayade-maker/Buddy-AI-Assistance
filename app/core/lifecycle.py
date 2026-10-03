@@ -196,6 +196,28 @@ class LifecycleManager:
             self._service_registry.register(RuntimeContext, self._context)
             self._service_registry.register("context", self._context)
 
+            # 5. Initialize Tool Execution Subsystem if enabled
+            if getattr(self._config, "tools_enabled", True):
+                try:
+                    from app.tools.builtin import register_builtin_tools
+                    from app.tools.executor import ToolExecutor
+                    from app.tools.registry import ToolRegistry
+
+                    tool_reg = ToolRegistry()
+                    register_builtin_tools(tool_reg)
+                    tool_exec = ToolExecutor(
+                        registry=tool_reg,
+                        event_bus=self._event_bus,
+                        default_timeout=getattr(self._config, "tools_timeout", 10.0),
+                    )
+                    self._service_registry.register(ToolRegistry, tool_reg)
+                    self._service_registry.register("tool_registry", tool_reg)
+                    self._service_registry.register(ToolExecutor, tool_exec)
+                    self._service_registry.register("tool_executor", tool_exec)
+                    self._logger.info("Tool execution subsystem registered.")
+                except Exception as t_err:
+                    self._logger.warning("Could not register tool subsystem: %s", t_err)
+
             self._is_initialized = True
             self._logger.info("BUDDY Core Runtime services registered successfully.")
             return self._context

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import sys
+from typing import Any, Optional
 
 from app import __product__, __version__
 from app.ai.conversation import ConversationManager
@@ -32,6 +33,15 @@ async def run_cli_chat() -> int:
     )
 
     active_provider = router.get_provider()
+    pending_confirmation: list[Any] = []
+
+    async def _on_confirm_needed(event: Any) -> None:
+        pending_confirmation.append(event)
+
+    event_bus.subscribe(
+        __import__("app.tools").tools.ToolConfirmationRequiredEvent,
+        _on_confirm_needed,
+    )
 
     print("========================================================================")
     print(f"                   {__product__} v{__version__} — AI CHAT MODE")
@@ -39,13 +49,27 @@ async def run_cli_chat() -> int:
     print("                    Type 'exit' or 'quit' to end.")
     print("========================================================================\n")
 
+    confirmation_token: Optional[str] = None
+
     while True:
         try:
             # Read input synchronously in executor to allow clean cancellation
             loop = asyncio.get_running_loop()
-            user_input = await loop.run_in_executor(None, input, "You: ")
 
-            user_text = user_input.strip()
+            if pending_confirmation:
+                conf_event = pending_confirmation.pop(0)
+                prompt_str = f"[CONFIRM] Allow '{conf_event.tool_name}' ({conf_event.arguments})? [y/N]: "
+                user_input = await loop.run_in_executor(None, input, prompt_str)
+                if user_input.strip().lower() in ("y", "yes"):
+                    confirmation_token = conf_event.token
+                    user_text = f"Confirmed tool execution with token {conf_event.token}"
+                else:
+                    confirmation_token = None
+                    user_text = "Action cancelled by user"
+            else:
+                user_input = await loop.run_in_executor(None, input, "You: ")
+                user_text = user_input.strip()
+
             if not user_text:
                 continue
 
@@ -53,7 +77,12 @@ async def run_cli_chat() -> int:
                 print("\nBUDDY: Goodbye! Have a great day.")
                 break
 
-            response = await conversation_mgr.process_user_turn(user_text, voice_response=False)
+            response = await conversation_mgr.process_user_turn(
+                user_text,
+                voice_response=False,
+                confirmation_token=confirmation_token,
+            )
+            confirmation_token = None
             print(f"BUDDY: {response.content}\n")
 
         except (KeyboardInterrupt, EOFError):
