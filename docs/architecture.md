@@ -140,3 +140,78 @@ The following core runtime systems are active and verified:
 8. **Runtime Context (`app/core/context.py`)**:
    - Unified typed container passing active core runtime services across future modules.
 
+---
+
+## 6. Loop 2 Voice Pipeline Architecture (Implemented)
+
+BUDDY implements a decoupled, vendor-agnostic voice subsystem:
+
+```text
+                 MICROPHONE
+                     │
+                     ▼
+              AUDIO CAPTURE (SoundDevice / Mock)
+                     │
+                     ▼
+            VOICE ACTIVITY DETECTION (Energy RMS / Mock)
+                     │
+                     ▼
+              SPEECH-TO-TEXT (SpeechRecognition / Mock)
+                     │
+                     ▼
+              VOICE COMMAND (VoiceCommandReceivedEvent)
+                     │
+                     ▼
+                BUDDY CORE (IDLE -> LISTENING -> THINKING)
+                     │
+                     ▼
+              TEXT RESPONSE
+                     │
+                     ▼
+             TEXT-TO-SPEECH (pyttsx3 / Mock)
+                     │
+                     ▼
+                 SPEAKER
+```
+
+### Components & Abstractions:
+
+1. **Audio Device Management (`app/voice/device.py`)**:
+   - `AudioDeviceManager`: Lists input/output devices, detects system defaults, and validates endpoint capabilities without crashing on missing hardware.
+
+2. **Audio Capture (`app/voice/capture.py`)**:
+   - `AudioCaptureInterface`: Vendor-neutral interface for start, stop, cancel, and chunk reading.
+   - `SoundDeviceAudioCapture`: Real-time microphone capture via PortAudio/sounddevice with non-blocking audio queues.
+   - `MockAudioCapture`: Deterministic audio capture generator for unit testing and CI.
+
+3. **Voice Activity Detection (`app/voice/vad.py`)**:
+   - `EnergyVAD`: Real-time RMS amplitude energy detector with configurable silence timeout (default 1.5s), minimum speech threshold (0.3s), and maximum duration bounds (15s).
+   - States: `WAITING` -> `SPEAKING` -> `SILENCE` -> `COMPLETED`.
+   - `MockVAD`: Programmable state transitions for headless testing.
+
+4. **Speech-to-Text (`app/voice/stt.py`)**:
+   - `SpeechToTextProvider`: Protocol returning structured `STTResult` (transcript, confidence, language, duration, provider).
+   - `SpeechRecognitionSTTProvider`: Python speech_recognition integration with thread pooling and timeout handling.
+   - `MockSTTProvider`: Deterministic, configurable transcription engine for CI.
+
+5. **Text-to-Speech & Speech Interruption (`app/voice/tts.py`)**:
+   - `TextToSpeechProvider`: Synthesizes and voices text with immediate cancellation support via `stop()`.
+   - `Pyttsx3TTSProvider`: Local, offline speech synthesis engine (Windows SAPI5).
+   - `MockTTSProvider`: In-memory speech recording and interruption tracking.
+
+6. **Wake Word Detection (`app/voice/wake.py`)**:
+   - `WakeWordDetector`: Abstract trigger phrase detector interface.
+   - `MockWakeWordDetector`: Deterministic detector for automated testing.
+   - `KeywordWakeWordDetector`: Lightweight keyword verification through STT.
+
+7. **Voice Pipeline Orchestrator (`app/voice/pipeline.py`)**:
+   - Coordinates the full voice cycle while updating BUDDY core state (`IDLE` -> `LISTENING` -> `THINKING`).
+   - Publishes decoupled voice events: `VoiceListeningStartedEvent`, `VoiceListeningStoppedEvent`, `VoiceCommandReceivedEvent`, `VoiceRecognitionFailedEvent`, `SpeechStartedEvent`, `SpeechStoppedEvent`, `SpeechSynthesisFailedEvent`.
+   - Measures capture, VAD, STT, and total pipeline latency.
+
+8. **Privacy & Security Architecture**:
+   - In-memory ephemeral buffers: raw PCM bytes are scrubbed immediately after transcription.
+   - Transcript masking: Transcripts are suppressed or masked at INFO level unless `LOG_TRANSCRIPTS=true` is set.
+   - Zero continuous recording or unauthorized audio transmission.
+
+

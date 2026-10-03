@@ -76,6 +76,39 @@ class BuddyConfig(BaseSettings):
         default="hey buddy",
         validation_alias="WAKE_WORD",
     )
+    # Voice Pipeline Settings (Loop 2)
+    voice_enabled: bool = Field(
+        default=True,
+        validation_alias="VOICE_ENABLED",
+    )
+    audio_input_device: str = Field(
+        default="default",
+        validation_alias="AUDIO_INPUT_DEVICE",
+    )
+    audio_output_device: str = Field(
+        default="default",
+        validation_alias="AUDIO_OUTPUT_DEVICE",
+    )
+    audio_sample_rate: int = Field(
+        default=16000,
+        validation_alias="AUDIO_SAMPLE_RATE",
+    )
+    audio_channels: int = Field(
+        default=1,
+        validation_alias="AUDIO_CHANNELS",
+    )
+    voice_timeout: float = Field(
+        default=10.0,
+        validation_alias="VOICE_TIMEOUT",
+    )
+    vad_silence_timeout: float = Field(
+        default=1.5,
+        validation_alias="VAD_SILENCE_TIMEOUT",
+    )
+    log_transcripts: bool = Field(
+        default=False,
+        validation_alias="LOG_TRANSCRIPTS",
+    )
 
     @classmethod
     def load_from_env(cls, env_file: Optional[str] = None) -> BuddyConfig:
@@ -94,6 +127,14 @@ class BuddyConfig(BaseSettings):
             "BUDDY_AUDIT_LOG_PATH": "AUDIT_LOG_PATH",
             "BUDDY_MASTER_KEY_STORAGE": "MASTER_KEY_STORAGE",
             "BUDDY_WAKE_WORD": "WAKE_WORD",
+            "BUDDY_VOICE_ENABLED": "VOICE_ENABLED",
+            "BUDDY_AUDIO_INPUT_DEVICE": "AUDIO_INPUT_DEVICE",
+            "BUDDY_AUDIO_OUTPUT_DEVICE": "AUDIO_OUTPUT_DEVICE",
+            "BUDDY_AUDIO_SAMPLE_RATE": "AUDIO_SAMPLE_RATE",
+            "BUDDY_AUDIO_CHANNELS": "AUDIO_CHANNELS",
+            "BUDDY_VOICE_TIMEOUT": "VOICE_TIMEOUT",
+            "BUDDY_VAD_SILENCE_TIMEOUT": "VAD_SILENCE_TIMEOUT",
+            "BUDDY_LOG_TRANSCRIPTS": "LOG_TRANSCRIPTS",
         }
 
         for buddy_var, core_var in alias_map.items():

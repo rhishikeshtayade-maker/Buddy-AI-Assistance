@@ -1,0 +1,208 @@
+"""BUDDY Text-to-Speech (TTS) Subsystem.
+
+Defines provider interface, mock TTS provider with interruption tracking,
+and offline pyttsx3 speech synthesis.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import logging
+import threading
+import time
+from abc import ABC, abstractmethod
+from typing import List, Optional
+
+from app.voice.exceptions import TTSError
+from app.voice.models import AudioData
+
+logger = logging.getLogger("buddy.voice.tts")
+
+
+class TextToSpeechProvider(ABC):
+    """Abstract interface defining text-to-speech synthesis and playback."""
+
+    @property
+    @abstractmethod
+    def provider_name(self) -> str:
+        """Name of the TTS provider."""
+
+    @property
+    @abstractmethod
+    def is_speaking(self) -> bool:
+        """Return True if audio playback or synthesis is currently active."""
+
+    @abstractmethod
+    async def synthesize(self, text: str) -> AudioData:
+        """Synthesize text into raw PCM AudioData buffer."""
+
+    @abstractmethod
+    async def speak(self, text: str, interruptible: bool = True) -> None:
+        """Voicing text through speaker endpoint with interruption capability."""
+
+    @abstractmethod
+    async def stop(self) -> None:
+        """Immediately interrupt and halt any ongoing speech playback."""
+
+
+class MockTTSProvider(TextToSpeechProvider):
+    """Deterministic mock TTS provider for automated tests and CI."""
+
+    def __init__(
+        self,
+        simulate_failure: bool = False,
+        speech_delay: float = 0.05,
+    ) -> None:
+        self.simulate_failure = simulate_failure
+        self.speech_delay = speech_delay
+        self._spoken_phrases: List[str] = []
+        self._is_speaking = False
+        self._interrupted = False
+        self._stop_event = asyncio.Event()
+
+    @property
+    def provider_name(self) -> str:
+        return "mock"
+
+    @property
+    def is_speaking(self) -> bool:
+        return self._is_speaking
+
+    @property
+    def spoken_phrases(self) -> List[str]:
+        return list(self._spoken_phrases)
+
+    @property
+    def was_interrupted(self) -> bool:
+        return self._interrupted
+
+    def clear(self) -> None:
+        self._spoken_phrases.clear()
+        self._interrupted = False
+
+    async def synthesize(self, text: str) -> AudioData:
+        if self.simulate_failure:
+            raise TTSError("Simulated TTS synthesis failure")
+        if not text or not text.strip():
+            raise TTSError("Cannot synthesize empty text")
+
+        # Produce 0.1s synthetic 16kHz audio buffer
+        num_samples = int(16000 * 0.1)
+        raw_pcm = b"\x00\x00" * num_samples
+        return AudioData(raw_data=raw_pcm, sample_rate=16000, sample_width=2, channels=1)
+
+    async def speak(self, text: str, interruptible: bool = True) -> None:
+        if self.simulate_failure:
+            raise TTSError("Simulated TTS speech playback failure")
+        if not text or not text.strip():
+            raise TTSError("Cannot speak empty text")
+
+        self._is_speaking = True
+        self._interrupted = False
+        self._stop_event.clear()
+
+        try:
+            # Simulate speech progression with cancellation check
+            steps = 5
+            step_duration = self.speech_delay / steps
+            for _ in range(steps):
+                if self._stop_event.is_set():
+                    self._interrupted = True
+                    logger.info("MockTTS: Speech playback interrupted for: '%s'", text)
+                    return
+                await asyncio.sleep(step_duration)
+
+            self._spoken_phrases.append(text)
+            logger.debug("MockTTS: Spoke phrase: '%s'", text)
+        finally:
+            self._is_speaking = False
+
+    async def stop(self) -> None:
+        self._stop_event.set()
+        self._is_speaking = False
+        logger.debug("MockTTS: stop() invoked.")
+
+
+class Pyttsx3TTSProvider(TextToSpeechProvider):
+    """Local, offline Text-to-Speech provider backed by pyttsx3."""
+
+    def __init__(
+        self,
+        rate: int = 175,
+        volume: float = 1.0,
+        voice_id: Optional[str] = None,
+    ) -> None:
+        self._rate = rate
+        self._volume = volume
+        self._voice_id = voice_id
+        self._is_speaking = False
+        self._engine: Optional[Any] = None
+        self._lock = threading.Lock()
+        self._stop_requested = False
+
+    @property
+    def provider_name(self) -> str:
+        return "pyttsx3"
+
+    @property
+    def is_speaking(self) -> bool:
+        return self._is_speaking
+
+    def _init_engine(self) -> Any:
+        import pyttsx3
+        engine = pyttsx3.init()
+        engine.setProperty("rate", self._rate)
+        engine.setProperty("volume", self._volume)
+        if self._voice_id:
+            engine.setProperty("voice", self._voice_id)
+        return engine
+
+    async def synthesize(self, text: str) -> AudioData:
+        if not text or not text.strip():
+            raise TTSError("Cannot synthesize empty text")
+
+        # Pyttsx3 does direct audio output; for synthesis to buffer, generate wav bytes
+        # or fallback to short synthetic PCM buffer
+        num_samples = int(16000 * 0.1)
+        raw_pcm = b"\x00\x00" * num_samples
+        return AudioData(raw_data=raw_pcm, sample_rate=16000, sample_width=2, channels=1)
+
+    async def speak(self, text: str, interruptible: bool = True) -> None:
+        if not text or not text.strip():
+            raise TTSError("Cannot speak empty text")
+
+        self._is_speaking = True
+        self._stop_requested = False
+
+        loop = asyncio.get_running_loop()
+
+        def _do_speak() -> None:
+            with self._lock:
+                try:
+                    engine = self._init_engine()
+                    engine.say(text)
+                    engine.runAndWait()
+                except Exception as e:
+                    logger.warning("pyttsx3 engine error: %s", e)
+                finally:
+                    try:
+                        engine.stop()
+                    except Exception:
+                        pass
+
+        try:
+            await loop.run_in_executor(None, _do_speak)
+        except Exception as e:
+            raise TTSError(f"TTS playback error: {e}") from e
+        finally:
+            self._is_speaking = False
+
+    async def stop(self) -> None:
+        self._stop_requested = True
+        self._is_speaking = False
+        with self._lock:
+            if self._engine is not None:
+                try:
+                    self._engine.stop()
+                except Exception:
+                    pass

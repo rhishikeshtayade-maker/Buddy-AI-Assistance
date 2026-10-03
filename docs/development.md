@@ -53,10 +53,19 @@ python -m app.main --run
 
 ---
 
-## 4. Running Tests
+## 4. Running BUDDY Voice Subsystem & Smoke Test
 
 ```powershell
-# Run all unit tests via pytest
+# Run the live hardware voice smoke test (mic + speaker)
+python -m app.voice.smoke_test
+```
+
+---
+
+## 5. Running Tests
+
+```powershell
+# Run all unit tests via pytest (includes all automated voice tests)
 pytest tests/unit
 
 # Or using standard unittest runner
