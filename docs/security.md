@@ -83,3 +83,29 @@ Directives contained inside tool outputs (e.g. "Ignore previous instructions") a
 ## 8. Audit Logging (`AuditLogger`)
 
 Every tool request, permission decision, confirmation prompt, authentication attempt, execution status, and verification outcome is written to `data/audit.log` and runtime logs with automatic secret redaction.
+
+---
+
+## 9. Controlled Mouse & Keyboard Security Policy (Loop 6)
+
+### Target Binding & Coordinate Invariants
+- Direct coordinate injection (e.g. `x=500, y=500`) without a verified, unexpired `VisionTarget` is strictly rejected.
+- All target coordinates must be finite numeric values within display boundaries (`0 <= x < width`, `0 <= y < height`). NaN and Infinity are rejected immediately.
+- Targets expire after 30 seconds (TTL). Stale targets cannot be clicked.
+
+### Stale-Screen Protection
+- Every click action binds to the screen visual fingerprint generated when the target was detected.
+- Prior to clicking, the system inspects the current screen state. If the screen visual fingerprint has changed, the action is rejected with `SCREEN_CHANGED`.
+
+### Keyboard Restriction & Sensitive Text Protection
+- Keyboard key press is constrained to a hardcoded safe allowlist: `ENTER`, `ESC`, `TAB`, `BACKSPACE`, `SPACE`, `ARROW_UP`, `ARROW_DOWN`, `ARROW_LEFT`, `ARROW_RIGHT`, `HOME`, `END`, `PAGE_UP`, `PAGE_DOWN`.
+- Text typing automatically scans for password, token, pin, OTP, API key, and secret patterns. Any detected sensitive credentials cause immediate rejection.
+- Typed text is strictly excluded from output metadata, event payloads, and audit logs.
+
+### Protected Applications & Dangerous Actions
+- Interaction with password managers (1Password, Bitwarden, KeePass, LastPass), Windows Credential Manager, and UAC elevation dialogs is strictly forbidden and fails closed.
+- Target actions are categorized:
+  - `SAFE`: navigation, search, open menu (Low/Moderate risk)
+  - `MODERATE`: save, rename, submit (Moderate risk, confirmation required)
+  - `DANGEROUS`: delete, uninstall, format, drop, kill (High risk, explicit confirmation required)
+  - `CRITICAL`: security settings, credentials, privilege escalation (Critical risk, local PIN authentication + confirmation required)

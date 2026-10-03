@@ -6,9 +6,8 @@ Registers all standard, verified safe computer control tools into a ToolRegistry
 from __future__ import annotations
 
 import logging
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
-from app.security.path_policy import PathPolicy
 from app.tools.applications import AppCloseTool, AppListTool, AppOpenTool
 from app.tools.filesystem import (
     FileCopyTool,
@@ -18,6 +17,12 @@ from app.tools.filesystem import (
     FileRenameTool,
     FileSearchTool,
 )
+from app.tools.keyboard import KeyPressTool, TypeTextTool
+from app.tools.mouse import (
+    MouseClickTool,
+    MouseDoubleClickTool,
+    MouseScrollTool,
+)
 from app.tools.registry import ToolRegistry
 from app.tools.system import (
     SystemBatteryTool,
@@ -26,15 +31,24 @@ from app.tools.system import (
     SystemSetVolumeTool,
 )
 
+if TYPE_CHECKING:
+    from app.security.interaction_policy import InteractionPolicy
+    from app.security.path_policy import PathPolicy
+
 logger = logging.getLogger("buddy.tools.builtin")
 
 
 def register_builtin_tools(
     registry: ToolRegistry,
     path_policy: Optional[PathPolicy] = None,
+    interaction_policy: Optional[InteractionPolicy] = None,
 ) -> None:
     """Register all standard built-in tools with the registry."""
+    from app.security.interaction_policy import InteractionPolicy
+    from app.security.path_policy import PathPolicy
+
     policy = path_policy or PathPolicy()
+    ipolicy = interaction_policy or InteractionPolicy()
 
     # System Diagnostics & Controls
     registry.register_tool(SystemInfoTool())
@@ -54,5 +68,12 @@ def register_builtin_tools(
     registry.register_tool(FileRenameTool(policy))
     registry.register_tool(FileCopyTool(policy))
     registry.register_tool(FileMoveTool(policy))
+
+    # Controlled Mouse & Keyboard Interaction Controls (Loop 6)
+    registry.register_tool(MouseClickTool(ipolicy))
+    registry.register_tool(MouseDoubleClickTool(ipolicy))
+    registry.register_tool(MouseScrollTool(ipolicy))
+    registry.register_tool(KeyPressTool(ipolicy))
+    registry.register_tool(TypeTextTool(ipolicy))
 
     logger.info("Registered all builtin tools (%d total)", len(registry.list_tools()))

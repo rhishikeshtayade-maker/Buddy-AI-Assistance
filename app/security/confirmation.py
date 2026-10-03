@@ -13,10 +13,12 @@ import secrets
 import threading
 import time
 from dataclasses import dataclass
-from typing import Any, Dict, Optional
+from typing import TYPE_CHECKING, Any, Dict, Optional
 
 from app.core.exceptions import ConfirmationError
-from app.tools.models import ToolRequest
+
+if TYPE_CHECKING:
+    from app.tools.models import ToolRequest
 
 logger = logging.getLogger("buddy.security.confirmation")
 

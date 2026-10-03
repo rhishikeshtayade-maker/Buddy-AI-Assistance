@@ -15,8 +15,6 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 from app.core.logging import REDACTED_MASK, redact_sensitive_data
-from app.tools.models import ToolExecutionStatus, ToolRiskLevel
-
 logger = logging.getLogger("buddy.security.audit")
 
 

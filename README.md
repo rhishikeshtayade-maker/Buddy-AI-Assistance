@@ -29,9 +29,9 @@ BUDDY is developed using strict **Loop Engineering**:
 - [x] **LOOP 2**: Voice Pipeline (Audio capture, VAD, Wake Word, STT/TTS abstractions)
 - [x] **LOOP 3**: AI Provider Layer & Conversational Brain (Unified AIProvider, streaming, retries, Conversation Manager)
 - [x] **LOOP 4**: Secure Tool System & Computer Control (Permission Engine, Risk 0-4, Confirmation tokens, PathPolicy, Allowlisted Apps, Sandboxed Filesystem, Empirical Verification)
-- [ ] **LOOP 5**: Secure Tool Registry & Protocol
-- [ ] **LOOP 6**: Computer Control (Applications, Filesystem, System Diagnostics)
-- [ ] **LOOP 7**: Browser Agent (Controlled web navigation & scraping)
+- [x] **LOOP 5**: Screen Understanding + Controlled Computer Vision (Bounding boxes, VisionTarget, ScreenManager state fingerprinting)
+- [x] **LOOP 6**: Controlled Mouse & Keyboard Interaction (Target-bound clicks, keyboard allowlist, stale-screen protection, sensitive text defense, zero coordinate injection)
+- [ ] **LOOP 7**: Advanced Agentic Task Planning + Multi-Step Execution
 - [ ] **LOOP 8**: Agentic Task Planner & Step Decomposition
 - [ ] **LOOP 9**: Verification Engine (Post-action state confirmation)
 - [ ] **LOOP 10**: Memory System (Short-term & Long-term semantic store)

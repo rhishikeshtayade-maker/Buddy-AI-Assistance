@@ -117,3 +117,21 @@ If verification fails:
 Every tool request emits structured audit records to `data/audit.log` and standard logging:
 - Automatic masking of passwords, tokens, API keys, and sensitive parameters.
 - Audit trail includes: `timestamp`, `request_id`, `conversation_id`, `tool_name`, `risk_level`, `permission_decision`, `confirmation_decision`, `execution_status`, `verified`, `execution_latency`, `error_category`.
+
+---
+
+## 7. Controlled Mouse & Keyboard Interaction Tools (Loop 6)
+
+| Tool Name | Module | Risk Level | Confirmation? | Description |
+|---|---|---|---|---|
+| `mouse.click` | `app.tools.mouse` | MODERATE (2) | **Yes** | Click a verified UI element. Requires valid `target_id` and detection fingerprint. |
+| `mouse.double_click` | `app.tools.mouse` | MODERATE (2) | **Yes** | Double-click a verified UI element on screen. |
+| `mouse.scroll` | `app.tools.mouse` | LOW (1) | No | Scroll active window vertically by non-zero lines (bounded to -100..100). |
+| `keyboard.key_press` | `app.tools.keyboard` | LOW (1) | No | Press a single allowlisted navigation key (e.g. ENTER, ESC, TAB, SPACE, ARROWS). |
+| `keyboard.type_text` | `app.tools.keyboard` | LOW (1) | No | Type user-approved harmless text into focused element. Passwords/tokens rejected. |
+
+### Interaction Models & Proposals
+- `UIActionProposal`: Produced from vision analysis and user intent. Links action to an empirically verified `VisionTarget`.
+- `InteractionRequest`: Strictly bound instruction with verified `(x, y)` coordinates, `target_id`, `screen_fingerprint`, and bounds validation.
+- Direct raw coordinate injection without a verified target is strictly prohibited.
+- Typed text is never persisted or logged in audit records or event payloads.

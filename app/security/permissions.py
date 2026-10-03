@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import Any, Optional
 
 from app.tools.models import (
     ToolDefinition,
@@ -38,13 +38,23 @@ class PermissionEngine:
     """Evaluates whether an AI tool request is permissible and what gates must be satisfied.
 
     Key Security Rule:
-    Risk classification is derived SOLELY from the trusted registered ToolDefinition.
+    Risk classification is derived SOLELY from the trusted registered ToolDefinition
+    and verified system policy metadata (e.g. InteractionPolicy target classification).
     The AI model's prompt, natural-language explanation, or request parameters can
     NEVER downgrade the risk tier or bypass confirmation/authentication.
     """
 
-    def __init__(self, require_confirmation_for_risk2_and_above: bool = True) -> None:
+    def __init__(
+        self,
+        require_confirmation_for_risk2_and_above: bool = True,
+        interaction_policy: Optional[Any] = None,
+    ) -> None:
         self._require_confirmation_for_risk2 = require_confirmation_for_risk2_and_above
+        self._interaction_policy = interaction_policy
+
+    def set_interaction_policy(self, policy: Any) -> None:
+        """Attach interaction policy for dynamic target risk evaluation."""
+        self._interaction_policy = policy
 
     def evaluate(self, request: ToolRequest, definition: ToolDefinition) -> PermissionDecision:
         """Evaluate a tool invocation request against the tool definition.
@@ -69,6 +79,17 @@ class PermissionEngine:
 
         risk = definition.risk_level
         perm = definition.permission_level
+
+        # Target risk elevation from trusted InteractionPolicy (Phases 5 & 11)
+        # Risk can ONLY be elevated; it can NEVER be downgraded by request arguments.
+        if self._interaction_policy and "target_id" in request.arguments:
+            target_id = request.arguments.get("target_id")
+            if target_id and isinstance(target_id, str):
+                target = self._interaction_policy.get_verified_target(target_id)
+                if target:
+                    target_risk = self._interaction_policy.evaluate_target_risk(target)
+                    if target_risk > risk:
+                        risk = target_risk
 
         # Evaluate confirmation requirement
         requires_confirmation = definition.requires_confirmation

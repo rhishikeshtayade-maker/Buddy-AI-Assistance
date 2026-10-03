@@ -92,3 +92,98 @@ class ToolDeniedEvent(BaseEvent):
     request_id: str = ""
     tool_name: str = ""
     reason: str = "Execution denied by security policy"
+
+
+# ---------------------------------------------------------------------------
+# Loop 6: Controlled Mouse & Keyboard Interaction Events
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class InteractionRequestedEvent(BaseEvent):
+    """Emitted when a mouse or keyboard interaction proposal/request is submitted."""
+
+    action_id: str = ""
+    action_type: str = ""
+    target_id: Optional[str] = None
+    coordinates: Optional[tuple[float, float]] = None
+
+
+@dataclass(frozen=True)
+class InteractionPermissionCheckedEvent(BaseEvent):
+    """Emitted after evaluating interaction against interaction security policies."""
+
+    action_id: str = ""
+    action_type: str = ""
+    risk_level: ToolRiskLevel = ToolRiskLevel.MODERATE
+    allowed: bool = False
+    requires_confirmation: bool = False
+    reason: str = ""
+
+
+@dataclass(frozen=True)
+class InteractionConfirmationRequiredEvent(BaseEvent):
+    """Emitted when mouse/keyboard action requires explicit interactive confirmation."""
+
+    action_id: str = ""
+    action_type: str = ""
+    target_id: Optional[str] = None
+    target_label: str = ""
+    token: str = ""
+    expires_at: float = 0.0
+
+
+@dataclass(frozen=True)
+class MouseActionStartedEvent(BaseEvent):
+    """Emitted immediately before invoking mouse click, double click, or scroll."""
+
+    action_id: str = ""
+    action_type: str = ""
+    coordinates: Optional[tuple[float, float]] = None
+
+
+@dataclass(frozen=True)
+class MouseActionCompletedEvent(BaseEvent):
+    """Emitted upon successful execution and verification of a mouse action."""
+
+    action_id: str = ""
+    action_type: str = ""
+    verified: bool = True
+    latency: float = 0.0
+
+
+@dataclass(frozen=True)
+class KeyboardActionStartedEvent(BaseEvent):
+    """Emitted immediately before key press or text typing."""
+
+    action_id: str = ""
+    action_type: str = ""
+    key: Optional[str] = None
+
+
+@dataclass(frozen=True)
+class KeyboardActionCompletedEvent(BaseEvent):
+    """Emitted upon successful execution and verification of a keyboard action."""
+
+    action_id: str = ""
+    action_type: str = ""
+    verified: bool = True
+    latency: float = 0.0
+
+
+@dataclass(frozen=True)
+class InteractionVerificationFailedEvent(BaseEvent):
+    """Emitted when expected screen/UI state did not materialize post-interaction."""
+
+    action_id: str = ""
+    action_type: str = ""
+    reason: str = "Screen state did not change or verify as expected"
+
+
+@dataclass(frozen=True)
+class InteractionDeniedEvent(BaseEvent):
+    """Emitted when interaction is blocked (e.g. stale target, raw coords, sensitive text)."""
+
+    action_id: str = ""
+    action_type: str = ""
+    reason: str = ""

@@ -100,3 +100,21 @@ python -m app.ai.chat
 # You: Get battery status
 # You: Get system info
 ```
+
+---
+
+## 8. Controlled Mouse & Keyboard Interaction Testing (Loop 6)
+
+```powershell
+# Run the automated interaction smoke test (Notepad launch -> verified click -> text typing -> cleanup)
+python -m app.tools.smoke_test_interaction
+
+# Run in headless / mock mode (ideal for CI and isolated testing)
+python -m app.tools.smoke_test_interaction --mock
+
+# Run the 19-point adversarial interaction security suite
+pytest tests/security/test_interaction_security.py -v
+
+# Run mouse and keyboard unit tests
+pytest tests/unit/test_mouse_tools.py tests/unit/test_keyboard_tools.py tests/unit/test_interaction_policy.py -v
+```

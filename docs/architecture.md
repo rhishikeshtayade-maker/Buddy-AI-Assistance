@@ -347,3 +347,55 @@ BUDDY implements a secure, provider-independent tool execution framework that al
    - Passes tool requests from AI response to `ToolExecutor`.
    - Returns verified results as untrusted content wrapped in `<untrusted_external_content>` to defend against prompt injection.
    - Updates state machine: `IDLE` -> `THINKING` -> `EXECUTING` -> `THINKING` -> `SPEAKING` -> `IDLE`.
+
+---
+
+## 9. Loop 6 Controlled Mouse & Keyboard Interaction Architecture
+
+```text
+       Voice
+         │
+         ▼
+        AI
+         │
+         ▼
+      Vision
+         │
+         ▼
+    VisionTarget (verified bounding box, confidence >= 0.70, screen fingerprint)
+         │
+         ▼
+  UIActionProposal (action_type, target, screen_dimensions, risk_level)
+         │
+         ▼
+ InteractionRequest (strictly bound coordinates, target_id, fingerprint)
+         │
+         ▼
+ PermissionEngine (target risk classification: SAFE, MODERATE, DANGEROUS, CRITICAL)
+         │
+         ▼
+ Confirmation Boundary (cryptographic token bound to target & arguments)
+         │
+         ▼
+ Interaction Tools (mouse.click, mouse.double_click, mouse.scroll, keyboard.key_press, keyboard.type_text)
+         │
+         ▼
+ Empirical Verification (screen state change / accessibility change verification)
+         │
+         ▼
+     ToolResult
+         │
+         ▼
+        AI
+         │
+         ▼
+       Voice
+```
+
+### Core Tenets of Controlled Interaction:
+1. **The AI Never Directly Controls Mouse or Keyboard**: The AI can only produce a structured `UIActionProposal`.
+2. **Coordinates Must Originate from Verified Targets**: Direct raw coordinate injection (`x=100, y=200`) without a registered, unexpired `VisionTarget` is rejected immediately.
+3. **Stale-Screen Protection**: Actions carry the detection-time screen visual fingerprint. If the screen changes dynamically prior to click execution, the action is rejected with `SCREEN_CHANGED`.
+4. **Restricted Keyboard Allowlist**: Only explicit safe navigation keys (`ENTER`, `ESC`, `TAB`, `SPACE`, arrow keys, etc.) are allowed. Arbitrary OS shortcut combos are rejected.
+5. **Zero Credential / Password Typing**: Automatic typing of passwords, OTPs, API keys, or security tokens is strictly forbidden and fails closed. Typed text is never persisted or logged in audit records.
+6. **Narrow Native APIs**: Uses low-level Windows User32 APIs via `ctypes` (`SetCursorPos`, `mouse_event`, `keybd_event`) without third-party automation dependencies like PyAutoGUI.
