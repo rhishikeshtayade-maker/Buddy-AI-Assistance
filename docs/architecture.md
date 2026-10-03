@@ -79,32 +79,64 @@
 
 ## 4. State Machine Specification
 
-BUDDY operates under strict states:
+BUDDY operates under strict, strongly-typed states (`BuddyState`):
+
+```text
+STARTING -> IDLE, ERROR
+IDLE -> LISTENING, THINKING, SHUTTING_DOWN
+LISTENING -> THINKING, ERROR, SHUTTING_DOWN
+THINKING -> EXECUTING, SPEAKING, ERROR, SHUTTING_DOWN
+EXECUTING -> THINKING, SPEAKING, ERROR, SHUTTING_DOWN
+SPEAKING -> IDLE, ERROR, SHUTTING_DOWN
+ERROR -> IDLE, SHUTTING_DOWN
+SHUTTING_DOWN -> (terminal)
 ```
-  [STARTING]
-      |
-      v
-    [IDLE] <------------------------------------+
-      |                                         |
-      | (Wake word or Push-to-talk)             |
-      v                                         |
-  [LISTENING]                                   |
-      |                                         |
-      | (Speech captured & transcribed)         |
-      v                                         |
-  [THINKING]                                    |
-      |                                         |
-      +---> [Awaiting Confirmation / Auth]      |
-      |               |                         |
-      | (Approved)    | (Denied)                |
-      v               v                         |
-  [EXECUTING] --------+                         |
-      |                                         |
-      | (Response ready)                        |
-      v                                         |
-  [SPEAKING] -----------------------------------+
-      |
-      | (Fatal error or user interrupt)
-      v
-   [ERROR] ---> [IDLE]
-```
+
+Transitions are strictly validated against `VALID_TRANSITIONS`. Invalid transitions immediately raise `StateTransitionError`.
+
+---
+
+## 5. Loop 1 Core Runtime Architecture (Implemented)
+
+The following core runtime systems are active and verified:
+
+1. **State Machine (`app/core/state.py`)**:
+   - Strongly typed `BuddyState` enum.
+   - Rejection of illegal transitions with explicit `StateTransitionError`.
+   - Immutable `StateTransitionRecord` history audit log.
+   - Synchronous/async thread safety using recursive locks.
+
+2. **Async Event Bus (`app/core/events.py`)**:
+   - Decoupled publisher-subscriber model with `subscribe()`, `unsubscribe()`, and `publish()`.
+   - Core typed events: `ApplicationStartedEvent`, `ApplicationStoppingEvent`, `ApplicationStoppedEvent`, `StateChangedEvent`, `ErrorEvent`, `HealthChangedEvent`.
+   - Exception isolation ensuring a single failing subscriber cannot crash the bus or disrupt others.
+   - Idempotent bus shutdown.
+
+3. **Typed Configuration (`app/core/config.py`)**:
+   - Environment-driven schema via Pydantic Settings (`BuddyConfig`).
+   - Dual-naming support (`APP_ENV` / `BUDDY_ENV`, `LOG_LEVEL` / `BUDDY_LOG_LEVEL`).
+   - Automatic secret masking via `to_safe_dict()`.
+
+4. **Structured Logging & Secret Redaction (`app/core/logging.py`)**:
+   - Unified logging namespace (`buddy.*`).
+   - Contextual attributes: `state`, `event`, `operation`.
+   - Automated regex-based scrubbing (`SecretRedactionFilter`) of API keys, bearer tokens, passwords, and private keys.
+
+5. **Service Registry (`app/core/registry.py`)**:
+   - Thread-safe key/type service locator avoiding brittle global singletons.
+   - Strict duplication prevention with override controls.
+
+6. **Health Monitoring System (`app/core/health.py`)**:
+   - Status levels: `HEALTHY`, `DEGRADED`, `UNHEALTHY`.
+   - Built-in diagnostics for configuration, event bus, service registry, and system runtime.
+   - Concurrently executed checks with latency timing.
+   - Aggregated system status calculation.
+
+7. **Lifecycle Manager (`app/core/lifecycle.py`)**:
+   - Deterministic startup: `initialize()` -> `start()` -> `run()` -> `stop()` -> `shutdown()`.
+   - Idempotent cleanup safe against multiple invocations.
+   - Windows console signal interception (`SIGINT`, `SIGTERM`, `SIGBREAK`).
+
+8. **Runtime Context (`app/core/context.py`)**:
+   - Unified typed container passing active core runtime services across future modules.
+

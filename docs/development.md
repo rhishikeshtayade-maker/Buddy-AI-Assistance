@@ -41,11 +41,26 @@ cp .env.example .env
 
 ---
 
-## 3. Running Tests
+## 3. Running BUDDY Core Runtime & Diagnostics
 
 ```powershell
-# Run all unit tests
+# Run the core runtime bootstrap and diagnostics
+python -m app.main
+
+# Run in persistent event-loop mode
+python -m app.main --run
+```
+
+---
+
+## 4. Running Tests
+
+```powershell
+# Run all unit tests via pytest
 pytest tests/unit
+
+# Or using standard unittest runner
+python -m unittest discover -s tests -v
 
 # Run security test suite
 pytest tests/security

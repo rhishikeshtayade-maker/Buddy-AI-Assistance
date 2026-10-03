@@ -1,0 +1,153 @@
+"""BUDDY Typed Configuration Subsystem.
+
+Provides typed, environment-driven configuration schema, validation rules,
+and safe serialization with automatic secret masking.
+"""
+
+from __future__ import annotations
+
+import os
+from pathlib import Path
+from typing import Any, Dict, Literal, Optional, Set
+from pydantic import Field, field_validator
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+from app.core.exceptions import ConfigurationError
+from app.core.logging import REDACTED_MASK
+
+AppEnvType = Literal["development", "production", "testing", "staging"]
+LogLevelType = Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
+
+
+class BuddyConfig(BaseSettings):
+    """Strongly typed application configuration model for BUDDY."""
+
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
+        case_sensitive=False,
+    )
+
+    # Core Runtime Settings
+    app_env: AppEnvType = Field(
+        default="development",
+        validation_alias="APP_ENV",
+    )
+    log_level: LogLevelType = Field(
+        default="INFO",
+        validation_alias="LOG_LEVEL",
+    )
+    buddy_name: str = Field(
+        default="BUDDY",
+        validation_alias="BUDDY_NAME",
+    )
+    data_dir: Path = Field(
+        default=Path("data"),
+        validation_alias="DATA_DIR",
+    )
+
+    # Future Module Stubs (Initialized with safe local defaults)
+    ai_provider: str = Field(
+        default="mock",
+        validation_alias="AI_PROVIDER",
+    )
+    stt_provider: str = Field(
+        default="mock",
+        validation_alias="STT_PROVIDER",
+    )
+    tts_provider: str = Field(
+        default="mock",
+        validation_alias="TTS_PROVIDER",
+    )
+    database_path: Path = Field(
+        default=Path("data/buddy.db"),
+        validation_alias="DATABASE_PATH",
+    )
+    audit_log_path: Path = Field(
+        default=Path("data/audit.log"),
+        validation_alias="AUDIT_LOG_PATH",
+    )
+    master_key_storage: str = Field(
+        default="keyring",
+        validation_alias="MASTER_KEY_STORAGE",
+    )
+    wake_word: str = Field(
+        default="hey buddy",
+        validation_alias="WAKE_WORD",
+    )
+
+    @classmethod
+    def load_from_env(cls, env_file: Optional[str] = None) -> BuddyConfig:
+        """Load configuration respecting BUDDY_ prefixed fallbacks and explicit env file."""
+        # Handle dual naming (BUDDY_ENV -> APP_ENV, BUDDY_LOG_LEVEL -> LOG_LEVEL, etc.)
+        env_overrides: Dict[str, Any] = {}
+
+        alias_map = {
+            "BUDDY_ENV": "APP_ENV",
+            "BUDDY_LOG_LEVEL": "LOG_LEVEL",
+            "BUDDY_DATA_DIR": "DATA_DIR",
+            "BUDDY_AI_PROVIDER": "AI_PROVIDER",
+            "BUDDY_STT_PROVIDER": "STT_PROVIDER",
+            "BUDDY_TTS_PROVIDER": "TTS_PROVIDER",
+            "BUDDY_DATABASE_PATH": "DATABASE_PATH",
+            "BUDDY_AUDIT_LOG_PATH": "AUDIT_LOG_PATH",
+            "BUDDY_MASTER_KEY_STORAGE": "MASTER_KEY_STORAGE",
+            "BUDDY_WAKE_WORD": "WAKE_WORD",
+        }
+
+        for buddy_var, core_var in alias_map.items():
+            if buddy_var in os.environ and core_var not in os.environ:
+                env_overrides[core_var] = os.environ[buddy_var]
+
+        try:
+            if env_file:
+                return cls(_env_file=env_file, **env_overrides)
+            return cls(**env_overrides)
+        except Exception as e:
+            raise ConfigurationError(f"Failed to load or validate configuration: {e}") from e
+
+    @field_validator("log_level", mode="before")
+    @classmethod
+    def normalize_log_level(cls, v: Any) -> str:
+        if isinstance(v, str):
+            upper = v.upper().strip()
+            if upper in ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"):
+                return upper
+        raise ValueError(f"Invalid log level: {v}. Must be DEBUG, INFO, WARNING, ERROR, or CRITICAL.")
+
+    @field_validator("app_env", mode="before")
+    @classmethod
+    def normalize_app_env(cls, v: Any) -> str:
+        if isinstance(v, str):
+            lower = v.lower().strip()
+            if lower in ("development", "production", "testing", "staging"):
+                return lower
+        raise ValueError(f"Invalid app environment: {v}. Must be development, production, testing, or staging.")
+
+    def to_safe_dict(self) -> Dict[str, Any]:
+        """Serialize configuration with all credentials, keys, and tokens redacted."""
+        raw = self.model_dump()
+        safe: Dict[str, Any] = {}
+
+        sensitive_keywords: Set[str] = {
+            "key",
+            "secret",
+            "password",
+            "token",
+            "salt",
+            "pin",
+            "credential",
+            "auth",
+        }
+
+        for k, v in raw.items():
+            is_sensitive = any(kw in k.lower() for kw in sensitive_keywords)
+            if is_sensitive and v is not None:
+                safe[k] = REDACTED_MASK
+            elif isinstance(v, Path):
+                safe[k] = str(v)
+            else:
+                safe[k] = v
+
+        return safe
