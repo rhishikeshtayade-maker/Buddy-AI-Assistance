@@ -1,0 +1,21 @@
+# Core Architecture & Validation
+pydantic>=2.7.0
+pydantic-settings>=2.2.0
+
+# Security & Cryptography (AES-256-GCM, Keyring)
+cryptography>=42.0.0
+keyring>=24.3.0
+
+# System & OS Inspection
+psutil>=5.9.8
+
+# Testing & Quality Assurance
+pytest>=8.1.0
+pytest-asyncio>=0.23.5
+
+# Optional / Future Loop Dependencies (Uncomment as needed per loop):
+# PySide6>=6.7.0           # Desktop UI (Loop 20)
+# pyttsx3>=2.90            # Local Offline TTS (Loop 2)
+# SpeechRecognition>=3.10  # Audio & STT (Loop 2)
+# pillow>=10.3.0           # Screenshot & Vision (Loop 17)
+# httpx>=0.27.0            # Cloud AI Providers HTTP client (Loop 3)
