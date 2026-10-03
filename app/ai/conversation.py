@@ -50,6 +50,7 @@ class ConversationManager:
         tool_executor: Optional[ToolExecutor] = None,
         system_prompt: str = BUDDY_SYSTEM_PROMPT,
         session_id: Optional[str] = None,
+        memory_manager: Optional[Any] = None,
     ) -> None:
         self._config = config
         self._event_bus = event_bus
@@ -58,6 +59,7 @@ class ConversationManager:
         self._voice_pipeline = voice_pipeline
         self._system_prompt = system_prompt
         self._session_id = session_id or str(uuid.uuid4())[:8]
+        self._memory_manager = memory_manager
 
         # Initialize Tool Execution Layer
         if tool_executor is not None:
@@ -94,6 +96,48 @@ class ConversationManager:
     def set_tool_executor(self, executor: ToolExecutor) -> None:
         """Attach a tool executor for tool dispatch."""
         self._tool_executor = executor
+
+    @property
+    def memory_manager(self) -> Optional[Any]:
+        return self._memory_manager
+
+    def set_memory_manager(self, manager: Any) -> None:
+        """Attach a memory manager for contextual personalization and user preference storage."""
+        self._memory_manager = manager
+
+    async def _handle_memory_command(self, cmd: Any, raw_text: str) -> str:
+        from app.core.exceptions import MemoryPolicyViolationError
+        from app.memory.models import MemoryCommandAction
+
+        action = cmd.action
+        if action == MemoryCommandAction.CLEAR_SESSION:
+            count = await self._memory_manager.clear_session()
+            return f"I have cleared your temporary session memory ({count} entries removed)."
+        elif action == MemoryCommandAction.CLEAR_ALL:
+            count = await self._memory_manager.clear_long_term()
+            return f"I have cleared all long-term memories ({count} entries removed)."
+        elif action == MemoryCommandAction.SHOW:
+            records = await self._memory_manager.list_memories(limit=10)
+            if not records:
+                return "I don't have any saved memories about your preferences yet."
+            items = [f"- {r.content} ({r.memory_type.value})" for r in records]
+            return "Here is what I remember about your preferences:\n" + "\n".join(items)
+        elif action == MemoryCommandAction.FORGET:
+            target = cmd.target_content or raw_text
+            success = await self._memory_manager.forget(target)
+            if success:
+                return f"I have forgotten your preference regarding '{target}'."
+            return f"I could not find any saved memory matching '{target}'."
+        elif action == MemoryCommandAction.REMEMBER:
+            target = cmd.target_content or raw_text
+            try:
+                rec = await self._memory_manager.remember(target)
+                return f"I'll remember that: {rec.content}."
+            except MemoryPolicyViolationError as pe:
+                return f"I cannot store that memory: {pe.message}"
+            except Exception as e:
+                return f"Failed to store memory: {e}"
+        return "Memory command processed."
 
     @property
     def session_id(self) -> str:
@@ -154,16 +198,35 @@ class ConversationManager:
         """Execute a full conversational turn for user input.
 
         Flow:
-        1. Append User Message
-        2. Transition State: IDLE -> THINKING (if permitted)
-        3. Dispatch to AI Provider
-        4. If AI requested tools: Transition THINKING -> EXECUTING -> Run tools -> Verify -> Record TOOL result -> THINKING
-        5. Append Assistant Response
-        6. If voice_response=True: Transition THINKING -> SPEAKING -> Voicing via TTS -> IDLE
-        7. Return AIResponse
+        1. Check natural language memory commands (remember, forget, show, clear)
+        2. Append User Message
+        3. Recall relevant contextual memories (untrusted context)
+        4. Transition State: IDLE -> THINKING
+        5. Dispatch to AI Provider with recalled memory context
+        6. Handle Tools if emitted
+        7. Append Assistant Response
+        8. Return AIResponse
         """
         async with self._lock:
             start_turn_time = time.perf_counter()
+
+            # Handle natural language memory commands if memory manager attached
+            if self._memory_manager:
+                mem_cmd = self._memory_manager.parse_memory_command(user_text)
+                if mem_cmd:
+                    resp_content = await self._handle_memory_command(mem_cmd, user_text)
+                    response = AIResponse(
+                        content=resp_content,
+                        provider="memory_manager",
+                        model="internal",
+                        tool_calls=[],
+                    )
+                    self._history.append(ChatMessage(role=MessageRole.USER, content=user_text, source=source))
+                    self._history.append(ChatMessage(role=MessageRole.ASSISTANT, content=resp_content, source=ContentSource.INTERNAL))
+                    self._truncate_history_if_needed()
+                    if self._state_machine.can_transition_to(BuddyState.IDLE):
+                        self._state_machine.transition_to(BuddyState.IDLE, reason="Memory command handled")
+                    return response
 
             if not self._history:
                 await self._event_bus.publish(
@@ -213,12 +276,26 @@ class ConversationManager:
                 )
             )
 
+            # 3. Retrieve relevant memories for bounded context injection
+            effective_system_prompt = self._system_prompt
+            if self._memory_manager:
+                try:
+                    recalled = await self._memory_manager.recall(
+                        user_text,
+                        limit=self._config.memory_max_context_records,
+                    )
+                    recalled_block = self._memory_manager.format_for_context(recalled)
+                    if recalled_block:
+                        effective_system_prompt = f"{self._system_prompt}\n\n{recalled_block}"
+                except Exception as e:
+                    logger.warning("Failed to recall memories for conversational turn: %s", e)
+
             try:
-                # 3. Invoke AI Provider
+                # 4. Invoke AI Provider
                 ai_start_time = time.perf_counter()
                 response = await provider.generate(
                     messages=self._history,
-                    system_prompt=self._system_prompt,
+                    system_prompt=effective_system_prompt,
                     model=self._config.ai_model,
                     temperature=self._config.ai_temperature,
                     max_tokens=self._config.ai_max_tokens,

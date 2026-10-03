@@ -139,3 +139,21 @@ pytest tests/security/test_agent_security.py -v
 # Run agent end-to-end tests (multi-step sequence & partial failure honesty)
 pytest tests/e2e/test_agent_e2e.py -v
 ```
+
+---
+
+## 10. Long-Term Memory & Contextual Personalization Testing (Loop 8)
+
+```powershell
+# Run the real Windows memory smoke test (persistence across restart, updates, deletions, secret rejection)
+python -m app.memory.smoke_test_memory
+
+# Run memory unit tests (models, store, policy, service, manager, retrieval, conflicts, encryption)
+pytest tests/unit/test_memory_models.py tests/unit/test_memory_store.py tests/unit/test_memory_policy.py tests/unit/test_memory_service.py tests/unit/test_memory_manager.py tests/unit/test_memory_retrieval.py tests/unit/test_memory_conflicts.py tests/unit/test_memory_encryption.py -v
+
+# Run the 25-point memory security & privacy test suite (passwords, tokens, JWTs, injection defense, bypass prevention)
+pytest tests/security/test_memory_security.py -v
+
+# Run memory end-to-end lifecycle & conversation integration tests
+pytest tests/e2e/test_memory_e2e.py -v
+```

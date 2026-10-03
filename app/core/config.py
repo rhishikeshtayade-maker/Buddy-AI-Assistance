@@ -159,6 +159,60 @@ class BuddyConfig(BaseSettings):
         validation_alias="LOG_TRANSCRIPTS",
     )
 
+    # Memory & Contextual Personalization Settings (Loop 8)
+    memory_enabled: bool = Field(
+        default=True,
+        validation_alias="MEMORY_ENABLED",
+    )
+    memory_database_path: Path = Field(
+        default=Path("data/memory.db"),
+        validation_alias="MEMORY_DATABASE_PATH",
+    )
+    memory_encryption_enabled: bool = Field(
+        default=False,
+        validation_alias="MEMORY_ENCRYPTION_ENABLED",
+    )
+    memory_encryption_key: Optional[str] = Field(
+        default=None,
+        validation_alias="MEMORY_ENCRYPTION_KEY",
+    )
+    memory_max_size_mb: int = Field(
+        default=50,
+        validation_alias="MEMORY_MAX_SIZE_MB",
+    )
+    memory_max_records: int = Field(
+        default=1000,
+        validation_alias="MEMORY_MAX_RECORDS",
+    )
+    memory_max_context_records: int = Field(
+        default=10,
+        validation_alias="MEMORY_MAX_CONTEXT_RECORDS",
+    )
+    memory_max_context_tokens: int = Field(
+        default=2000,
+        validation_alias="MEMORY_MAX_CONTEXT_TOKENS",
+    )
+    memory_session_ttl_seconds: float = Field(
+        default=3600.0,
+        validation_alias="MEMORY_SESSION_TTL_SECONDS",
+    )
+    memory_episodic_ttl_days: int = Field(
+        default=30,
+        validation_alias="MEMORY_EPISODIC_TTL_DAYS",
+    )
+    memory_inferred_ttl_days: int = Field(
+        default=7,
+        validation_alias="MEMORY_INFERRED_TTL_DAYS",
+    )
+    memory_require_confirmation: bool = Field(
+        default=True,
+        validation_alias="MEMORY_REQUIRE_CONFIRMATION",
+    )
+    memory_secret_detection_enabled: bool = Field(
+        default=True,
+        validation_alias="MEMORY_SECRET_DETECTION_ENABLED",
+    )
+
     @classmethod
     def load_from_env(cls, env_file: Optional[str] = None) -> BuddyConfig:
         """Load configuration respecting BUDDY_ prefixed fallbacks and explicit env file."""
@@ -197,6 +251,19 @@ class BuddyConfig(BaseSettings):
             "BUDDY_VOICE_TIMEOUT": "VOICE_TIMEOUT",
             "BUDDY_VAD_SILENCE_TIMEOUT": "VAD_SILENCE_TIMEOUT",
             "BUDDY_LOG_TRANSCRIPTS": "LOG_TRANSCRIPTS",
+            "BUDDY_MEMORY_ENABLED": "MEMORY_ENABLED",
+            "BUDDY_MEMORY_DATABASE_PATH": "MEMORY_DATABASE_PATH",
+            "BUDDY_MEMORY_ENCRYPTION_ENABLED": "MEMORY_ENCRYPTION_ENABLED",
+            "BUDDY_MEMORY_ENCRYPTION_KEY": "MEMORY_ENCRYPTION_KEY",
+            "BUDDY_MEMORY_MAX_SIZE_MB": "MEMORY_MAX_SIZE_MB",
+            "BUDDY_MEMORY_MAX_RECORDS": "MEMORY_MAX_RECORDS",
+            "BUDDY_MEMORY_MAX_CONTEXT_RECORDS": "MEMORY_MAX_CONTEXT_RECORDS",
+            "BUDDY_MEMORY_MAX_CONTEXT_TOKENS": "MEMORY_MAX_CONTEXT_TOKENS",
+            "BUDDY_MEMORY_SESSION_TTL_SECONDS": "MEMORY_SESSION_TTL_SECONDS",
+            "BUDDY_MEMORY_EPISODIC_TTL_DAYS": "MEMORY_EPISODIC_TTL_DAYS",
+            "BUDDY_MEMORY_INFERRED_TTL_DAYS": "MEMORY_INFERRED_TTL_DAYS",
+            "BUDDY_MEMORY_REQUIRE_CONFIRMATION": "MEMORY_REQUIRE_CONFIRMATION",
+            "BUDDY_MEMORY_SECRET_DETECTION_ENABLED": "MEMORY_SECRET_DETECTION_ENABLED",
         }
 
         for buddy_var, core_var in alias_map.items():

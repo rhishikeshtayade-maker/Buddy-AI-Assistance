@@ -458,3 +458,64 @@ BUDDY implements a secure, provider-independent tool execution framework that al
 8. **Instant Human Cancellation**: Users can cancel a running task at any moment (`cancel_task()`). The executor immediately halts scheduling and prevents any further actions from beginning.
 9. **Untrusted Tool Result Boundary**: Tool outputs are untrusted external data and are wrapped/sanitized; tool results can never create tools, alter policies, or grant permissions.
 10. **Sanitized Persistence & Audit**: Audit logs record step metadata, permission decisions, and verification status. Passwords, secrets, sensitive typed text, and raw screenshots are strictly excluded from logs and task context.
+
+---
+
+## 11. Loop 8 Long-Term Memory & Contextual Personalization Architecture
+
+```text
+       USER INPUT / GOAL
+              │
+              ▼
+    CONVERSATION / AGENT
+              │
+              ▼
+       MEMORY MANAGER
+  (Natural Language Command Check)
+   ├── Remember / Forget / Clear / Show
+   └── Recalls Relevant Bounded Context
+              │
+              ▼
+        MEMORY POLICY
+   (Conservative Secret Detection &
+    Prompt Injection Neutralization)
+              │
+              ▼
+    BOUNDED CONTEXT INJECTION
+  (<recalled_context> untrusted data block)
+              │
+              ▼
+          AI REASONING
+  (Uses preferences without permission bypass)
+              │
+              ▼
+   AUTHENTICATED ENCRYPTION
+  (Optional Fernet AES key derivation)
+              │
+              ▼
+   SQLITE PERSISTENCE STORE
+  (Parameterized queries, WAL mode, migrations)
+```
+
+### Fundamental Architectural Tenet:
+> **MEMORY IS CONTEXT, NOT AUTHORITY.**
+> Stored memory entries are user preferences and factual context. Memory records CANNOT bypass `PermissionEngine`, CANNOT downgrade `ToolRiskLevel`, CANNOT skip user confirmation tokens, and CANNOT bypass authentication challenges.
+
+### Memory Categories & Lifecycles:
+1. **Session Memory**: Ephemeral context relevant only to the active dialogue/task. Bound by `memory_session_ttl_seconds` (default: 1 hour) and expires automatically.
+2. **Semantic Long-Term Memory**: Stable cross-session user preferences, project context, and workflows. Persisted until updated or forgotten.
+3. **Episodic Memory**: Bounded summaries of past interaction outcomes and workflows. Subject to `memory_episodic_ttl_days` (default: 30 days).
+4. **User-Profile Memory**: Explicitly user-approved personal directives (e.g., "Call me Rishi", "I prefer concise answers").
+
+### Provenance Hierarchy:
+- `USER_EXPLICIT`: Highest authority (direct user instruction).
+- `USER_CONFIRMED`: Inferred candidate explicitly confirmed by user.
+- `AI_INFERRED`: Provisional preference; requires confirmation to promote to permanent profile.
+- `SYSTEM_GENERATED`: Task summaries and operational metrics.
+- `IMPORTED`: User-approved external profile imports.
+
+### Conflict Resolution Strategy:
+When a new memory contradicts an existing active memory (e.g. switching browser preference from Chrome to Firefox), the system deterministically resolves the conflict:
+- New `USER_EXPLICIT` memory archives older contradictory memory.
+- Emits `MemoryConflictDetectedEvent`.
+- Prevents stale or contradictory memories from polluting prompt context.

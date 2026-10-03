@@ -34,12 +34,14 @@ class AgentService:
         event_bus: Optional[EventBus] = None,
         state_machine: Optional[StateMachine] = None,
         max_steps: int = 20,
+        memory_manager: Optional[Any] = None,
     ) -> None:
         self._registry = registry
         self._tool_executor = tool_executor
         self._ai_provider = ai_provider
         self._event_bus = event_bus
         self._state_machine = state_machine
+        self._memory_manager = memory_manager
 
         self._validator = TaskPlanValidator(registry, max_steps=max_steps)
         self._planner = TaskPlanner(
@@ -56,6 +58,13 @@ class AgentService:
 
         self._tasks: Dict[str, Task] = {}
         self._contexts: Dict[str, TaskContext] = {}
+
+    @property
+    def memory_manager(self) -> Optional[Any]:
+        return self._memory_manager
+
+    def set_memory_manager(self, manager: Any) -> None:
+        self._memory_manager = manager
 
     @property
     def planner(self) -> TaskPlanner:
@@ -98,10 +107,29 @@ class AgentService:
                 reason="Planning agentic task",
             )
 
-        task = await self._planner.plan(user_goal=user_goal, conversation_id=conversation_id)
-        self._tasks[task.task_id] = task
+        # 2. Recall contextual user preferences from memory if available
+        user_prefs: List[str] = []
+        if self._memory_manager:
+            try:
+                mems = await self._memory_manager.recall(user_goal, limit=5)
+                user_prefs = [m.content for m in mems]
+            except Exception as e:
+                logger.warning("Failed to recall user preferences for goal: %s", e)
 
-        ctx = TaskContext(task_id=task.task_id, user_goal=user_goal, conversation_id=conversation_id)
+        ctx = TaskContext(
+            task_id="provisional",
+            user_goal=user_goal,
+            conversation_id=conversation_id,
+            user_preferences=user_prefs,
+        )
+
+        task = await self._planner.plan(
+            user_goal=user_goal,
+            context=ctx,
+            conversation_id=conversation_id,
+        )
+        ctx.task_id = task.task_id
+        self._tasks[task.task_id] = task
         self._contexts[task.task_id] = ctx
 
         # Return to IDLE after planning if not executing immediately

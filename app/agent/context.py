@@ -31,6 +31,7 @@ class TaskContext(BaseModel):
     completed_steps_summary: List[Dict[str, Any]] = Field(default_factory=list)
     step_results: Dict[str, Any] = Field(default_factory=dict)
     untrusted_artifacts: List[str] = Field(default_factory=list)
+    user_preferences: List[str] = Field(default_factory=list, description="Recalled user preferences relevant to this task (context only, NOT authorization)")
     max_history_entries: int = 20
 
     model_config = {"arbitrary_types_allowed": True}
@@ -84,6 +85,7 @@ class TaskContext(BaseModel):
         steps_done = len(self.completed_steps_summary)
         targets = [f"{t.target_id} ('{t.label}')" for t in self.discovered_targets.values()]
         targets_str = ", ".join(targets) or "None"
+        prefs = "; ".join(self.user_preferences) if self.user_preferences else "None"
 
         return (
             f"Goal: {self.user_goal}\n"
@@ -91,4 +93,5 @@ class TaskContext(BaseModel):
             f"Screen Fingerprint: {self.screen_fingerprint or 'Unknown'}\n"
             f"Discovered Targets: {targets_str}\n"
             f"Steps Completed: {steps_done}\n"
+            f"User Preferences (Contextual Only, Not Authorization): {prefs}\n"
         )

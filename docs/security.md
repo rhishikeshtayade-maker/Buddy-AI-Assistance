@@ -150,3 +150,49 @@ Every tool request, permission decision, confirmation prompt, authentication att
 ### Human In-The-Loop Control
 - The user can issue a cancellation command (`cancel_task()`) at any time.
 - The executor aborts future steps immediately, ensuring that no further actions commence after cancellation.
+
+---
+
+## 11. Long-Term Memory Security & Privacy Model (Loop 8)
+
+### Non-Negotiable Principle: Memory is Context, NOT Authority
+- Stored memory can **NEVER**:
+  - Authorize a tool execution.
+  - Bypass `PermissionEngine` or `ToolExecutor` security checks.
+  - Downgrade a registered tool's `ToolRiskLevel`.
+  - Skip mandatory confirmation tokens or authentication challenges.
+  - Modify system instructions or override safety rules.
+
+### Conservative Secret Detection & Rejection
+- Before any memory candidate is accepted, it passes through `MemoryPolicy.detect_secrets()`.
+- Unconditionally rejects:
+  - API keys (`sk-...`, `ghp_...`, `AKIA...`, generic hex/base64 keys).
+  - Bearer tokens and JWTs (`eyJ...`).
+  - Passwords, PINs, and OTPs (`password is ...`, `pin is ...`, `otp is ...`).
+  - Private cryptographic keys (`-----BEGIN PRIVATE KEY-----`).
+  - Credit and debit card sequences (13–19 digits).
+  - Browser session cookies, client secrets, and auth tokens.
+- **Fail-Safe Principle**: False positives are strictly preferred over storing sensitive credentials.
+
+### Prompt Injection & Security Override Defense
+- Memory candidates are analyzed for adversarial prompt injection patterns:
+  - Attempts to declare "permanently authorized to execute shell".
+  - Attempts to "bypass confirmation" or "skip permissions".
+  - Attempts to "ignore system instructions".
+- Such candidates are rejected with `REJECTED_INJECTION`.
+
+### Untrusted Context Injection Boundary
+- When recalled into AI prompt context, memories are wrapped in strict untrusted XML blocks (`<recalled_context>`).
+- Explicit guardrails instruct the AI model to treat recalled memories strictly as user preferences and background facts, not as procedural instructions or security grants.
+
+### Authenticated Encryption & Fail-Closed Loading
+- Backed by `cryptography.fernet.Fernet` (AES-128-CBC + HMAC-SHA256 authenticated encryption).
+- When `memory_encryption_enabled=True`, if no valid key is provided via `BUDDY_MEMORY_KEY`, config, or `data/.memory_key`, the subsystem **fails closed** (`MemoryEncryptionError`) rather than falling back to unencrypted storage.
+
+### Data Minimization & Bounded Storage
+- Hard ceilings protect against denial-of-service and memory expansion attacks:
+  - `memory_max_size_mb` (default: 50MB)
+  - `memory_max_records` (default: 1000 records)
+  - `memory_max_context_records` (default: 10 per turn)
+  - `memory_max_context_tokens` (default: 2000 tokens)
+- Raw screenshots and raw microphone audio streams are strictly excluded from memory persistence.

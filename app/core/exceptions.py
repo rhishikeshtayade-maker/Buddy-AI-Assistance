@@ -112,5 +112,26 @@ class ValidationError(BuddyError):
     """Raised when structured input, plan, or configuration fails validation."""
 
 
+class MemorySubsystemError(BuddyError):
+    """Base exception for all memory subsystem errors."""
+
+
+class MemoryStorageError(MemorySubsystemError):
+    """Raised when memory database or store operation fails."""
+
+
+class MemoryPolicyViolationError(MemorySubsystemError):
+    """Raised when content violates memory storage policy (e.g. secret detected)."""
+
+
+class MemorySecurityError(SecurityError):
+    """Raised when an operation attempts to bypass memory security or authorization."""
+
+
+class MemoryEncryptionError(MemorySubsystemError, SecurityError):
+    """Raised when memory encryption or decryption fails."""
+
+
 # Compatibility alias
 RegistryError = ServiceRegistryError
+BuddyMemoryError = MemorySubsystemError
