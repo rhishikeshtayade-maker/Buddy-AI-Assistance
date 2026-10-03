@@ -214,4 +214,62 @@ BUDDY implements a decoupled, vendor-agnostic voice subsystem:
    - Transcript masking: Transcripts are suppressed or masked at INFO level unless `LOG_TRANSCRIPTS=true` is set.
    - Zero continuous recording or unauthorized audio transmission.
 
+---
+
+## 7. Loop 3 AI Provider & Conversational Brain Architecture (Implemented)
+
+BUDDY incorporates a provider-agnostic, security-bounded conversational reasoning layer:
+
+```text
+                    BUDDY
+                      │
+                      ▼
+              Conversation Manager
+                      │
+                      ▼
+                  AI Router
+                      │
+          ┌───────────┴───────────┐
+          ▼                       ▼
+    Cloud Provider           Local Provider (Ollama / Local LLM)
+  (OpenAI Compatible)             │
+          │                       ▼
+          ▼                  Local Model
+       AI Model
+```
+
+### Components & Responsibilities:
+
+1. **AI Provider Interface (`app/ai/provider.py`)**:
+   - `AIProvider`: Abstract protocol declaring `generate()` and `generate_stream()` with token limits, temperature, and timeouts.
+   - `MockAIProvider`: Deterministic, offline-testable AI generator with contextual response mapping and error simulation.
+   - `CloudAIProvider`: Resilient async HTTP client (via `httpx`) supporting standard chat completion endpoints, bounded exponential backoff retries on 429/5xx, and immediate failure on 401/403.
+   - `LocalAIProvider`: Integration contract for local inference engines (e.g. Ollama `localhost:11434`), gracefully reporting service unavailability when not running.
+
+2. **AI Router (`app/ai/router.py`)**:
+   - Configuration-driven selection (`AI_PROVIDER=mock|cloud|local`).
+   - Dynamic provider registry allowing custom providers without core modification.
+
+3. **Message & Response Models (`app/ai/models.py`)**:
+   - `ChatMessage`: Typed message unit with roles (`SYSTEM`, `USER`, `ASSISTANT`, `TOOL`, `EXTERNAL`) and content source classifications.
+   - `AIResponse`: Structured response with content, finish reasons, token usage metrics, latency, and tool calls.
+
+4. **Conversation Management (`app/ai/conversation.py`)**:
+   - Multi-turn conversation history tracking.
+   - Bounded context truncation enforcing `conversation_max_messages` to prevent token overflow.
+   - Event publication: `ConversationStartedEvent`, `UserMessageReceivedEvent`, `AIRequestStartedEvent`, `AIResponseReceivedEvent`, `ConversationErrorEvent`, `ConversationEndedEvent`.
+
+5. **Security & Prompt Injection Defenses (`app/ai/prompts.py`)**:
+   - Isolated `BUDDY_SYSTEM_PROMPT` establishing grounded identity, honesty about capabilities, and refusal to claim unverified actions.
+   - Untrusted Content Wrapping: `<untrusted_external_content source="...">` tags ensure web/external data cannot hijack internal instructions.
+   - Strict Execution Boundary: The AI layer has no path to raw execution (`os.system`, `subprocess`, unrestricted filesystem).
+
+6. **Voice Pipeline Integration (`app/ai/conversation.py` & `app/voice/pipeline.py`)**:
+   - End-to-end integration: `Microphone` -> `VAD` -> `STT` -> `VoiceCommandReceivedEvent` -> `ConversationManager` -> `AI Provider` -> `TTS` -> `Speaker`.
+   - Coordinated state machine progression: `IDLE` -> `LISTENING` -> `THINKING` -> `SPEAKING` -> `IDLE` (with automatic error recovery to `IDLE`).
+
+7. **Developer CLI Chat Mode (`app/ai/chat.py`)**:
+   - Interactive terminal testing harness (`python -m app.ai.chat`) enabling rapid prompt iteration without microphone hardware.
+
+
 

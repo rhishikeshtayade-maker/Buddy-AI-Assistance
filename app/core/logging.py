@@ -65,19 +65,14 @@ class SecretRedactionFilter(logging.Filter):
     """Logging filter that redacts secrets and credentials from all record messages."""
 
     def filter(self, record: logging.LogRecord) -> bool:
-        if isinstance(record.msg, str):
-            record.msg = redact_string(record.msg)
-
-        if record.args:
-            if isinstance(record.args, dict):
-                record.args = {
-                    k: (redact_string(v) if isinstance(v, str) else v)
-                    for k, v in record.args.items()
-                }
-            elif isinstance(record.args, (list, tuple)):
-                record.args = tuple(
-                    redact_string(a) if isinstance(a, str) else a for a in record.args
-                )
+        try:
+            if record.args:
+                record.msg = record.getMessage()
+                record.args = ()
+            if isinstance(record.msg, str):
+                record.msg = redact_string(record.msg)
+        except Exception:
+            pass
 
         return True
 

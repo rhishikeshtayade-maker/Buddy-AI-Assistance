@@ -62,7 +62,16 @@ python -m app.voice.smoke_test
 
 ---
 
-## 5. Running Tests
+## 5. Running BUDDY CLI Chat Mode (Keyboard / Text Testing)
+
+```powershell
+# Converse with BUDDY via interactive command-line interface
+python -m app.ai.chat
+```
+
+---
+
+## 6. Running Tests
 
 ```powershell
 # Run all unit tests via pytest (includes all automated voice tests)

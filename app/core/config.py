@@ -47,10 +47,42 @@ class BuddyConfig(BaseSettings):
         validation_alias="DATA_DIR",
     )
 
-    # Future Module Stubs (Initialized with safe local defaults)
+    # AI Configuration (Loop 3)
     ai_provider: str = Field(
         default="mock",
         validation_alias="AI_PROVIDER",
+    )
+    ai_model: str = Field(
+        default="gpt-4o-mini",
+        validation_alias="AI_MODEL",
+    )
+    ai_api_key: Optional[str] = Field(
+        default=None,
+        validation_alias="AI_API_KEY",
+    )
+    ai_base_url: Optional[str] = Field(
+        default="https://api.openai.com/v1",
+        validation_alias="AI_BASE_URL",
+    )
+    ai_temperature: float = Field(
+        default=0.7,
+        validation_alias="AI_TEMPERATURE",
+    )
+    ai_max_tokens: int = Field(
+        default=1024,
+        validation_alias="AI_MAX_TOKENS",
+    )
+    ai_timeout: float = Field(
+        default=30.0,
+        validation_alias="AI_TIMEOUT",
+    )
+    ai_max_retries: int = Field(
+        default=2,
+        validation_alias="AI_MAX_RETRIES",
+    )
+    conversation_max_messages: int = Field(
+        default=20,
+        validation_alias="CONVERSATION_MAX_MESSAGES",
     )
     stt_provider: str = Field(
         default="mock",
@@ -121,6 +153,15 @@ class BuddyConfig(BaseSettings):
             "BUDDY_LOG_LEVEL": "LOG_LEVEL",
             "BUDDY_DATA_DIR": "DATA_DIR",
             "BUDDY_AI_PROVIDER": "AI_PROVIDER",
+            "BUDDY_AI_MODEL": "AI_MODEL",
+            "BUDDY_AI_API_KEY": "AI_API_KEY",
+            "OPENAI_API_KEY": "AI_API_KEY",
+            "BUDDY_AI_BASE_URL": "AI_BASE_URL",
+            "BUDDY_AI_TEMPERATURE": "AI_TEMPERATURE",
+            "BUDDY_AI_MAX_TOKENS": "AI_MAX_TOKENS",
+            "BUDDY_AI_TIMEOUT": "AI_TIMEOUT",
+            "BUDDY_AI_MAX_RETRIES": "AI_MAX_RETRIES",
+            "BUDDY_CONVERSATION_MAX_MESSAGES": "CONVERSATION_MAX_MESSAGES",
             "BUDDY_STT_PROVIDER": "STT_PROVIDER",
             "BUDDY_TTS_PROVIDER": "TTS_PROVIDER",
             "BUDDY_DATABASE_PATH": "DATABASE_PATH",
