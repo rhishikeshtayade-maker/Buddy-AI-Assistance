@@ -262,4 +262,92 @@ class TaskPlanner:
                 max_steps=self._max_steps,
             )
 
+        # Pattern: "Open Google and search for <query>" (Loop 9 Browser Automation)
+        if self._registry.has_tool("browser.open") and ("search for" in goal_lower or "search" in goal_lower) and ("browser" in goal_lower or "google" in goal_lower or "web" in goal_lower):
+            search_match = re.search(r"search\s+(for\s+)?([^,.]+)", user_goal, re.IGNORECASE)
+            search_query = search_match.group(2).strip() if search_match else "Python tutorials"
+
+            step1 = TaskStep(
+                step_id="step_browser_open",
+                sequence=1,
+                description="Launch clean isolated browser session",
+                tool_name="browser.open",
+                arguments={},
+            )
+            step2 = TaskStep(
+                step_id="step_browser_nav",
+                sequence=2,
+                description="Navigate to search engine",
+                tool_name="browser.navigate",
+                arguments={"url": "https://www.google.com"},
+                dependencies=["step_browser_open"],
+            )
+            step3 = TaskStep(
+                step_id="step_browser_find",
+                sequence=3,
+                description="Identify search input textbox",
+                tool_name="browser.find",
+                arguments={"query": "Search", "role": "combobox"},
+                dependencies=["step_browser_nav"],
+            )
+            step4 = TaskStep(
+                step_id="step_browser_type",
+                sequence=4,
+                description=f"Type search query into input",
+                tool_name="browser.type",
+                arguments={"text": search_query, "selector": "textarea[name='q']"},
+                dependencies=["step_browser_find"],
+            )
+            step5 = TaskStep(
+                step_id="step_browser_enter",
+                sequence=5,
+                description="Press ENTER to submit search query",
+                tool_name="browser.press_key",
+                arguments={"key": "ENTER"},
+                dependencies=["step_browser_type"],
+            )
+            return Task(
+                task_id=task_id,
+                conversation_id=conversation_id,
+                user_goal=user_goal,
+                steps=[step1, step2, step3, step4, step5],
+                max_steps=self._max_steps,
+            )
+
+        # Pattern: "Navigate to <url> and extract text"
+        if self._registry.has_tool("browser.open") and ("navigate to" in goal_lower or "open http" in goal_lower or "open https" in goal_lower):
+            url_match = re.search(r"(https?://[^\s,]+)", user_goal)
+            target_url = url_match.group(1) if url_match else "https://example.com"
+
+            step1 = TaskStep(
+                step_id="step_browser_open",
+                sequence=1,
+                description="Launch isolated browser session",
+                tool_name="browser.open",
+                arguments={},
+            )
+            step2 = TaskStep(
+                step_id="step_browser_nav",
+                sequence=2,
+                description=f"Navigate to {target_url}",
+                tool_name="browser.navigate",
+                arguments={"url": target_url},
+                dependencies=["step_browser_open"],
+            )
+            step3 = TaskStep(
+                step_id="step_browser_extract",
+                sequence=3,
+                description="Extract page visible text content safely",
+                tool_name="browser.extract_text",
+                arguments={},
+                dependencies=["step_browser_nav"],
+            )
+            return Task(
+                task_id=task_id,
+                conversation_id=conversation_id,
+                user_goal=user_goal,
+                steps=[step1, step2, step3],
+                max_steps=self._max_steps,
+            )
+
         return None

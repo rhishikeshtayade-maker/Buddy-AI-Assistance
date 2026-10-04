@@ -157,3 +157,22 @@ pytest tests/security/test_memory_security.py -v
 # Run memory end-to-end lifecycle & conversation integration tests
 pytest tests/e2e/test_memory_e2e.py -v
 ```
+
+---
+
+## 11. Browser Automation & Web Interaction Testing (Loop 9)
+
+```powershell
+# Run the real Windows browser smoke test (local deterministic test page, click, type, tabs, downloads)
+python -m app.browser.smoke_test_browser
+
+# Run all 10 browser unit test suites
+pytest tests/unit/test_browser_models.py tests/unit/test_browser_policy.py tests/unit/test_browser_session.py tests/unit/test_browser_dom.py tests/unit/test_browser_accessibility.py tests/unit/test_browser_actions.py tests/unit/test_browser_downloads.py tests/unit/test_browser_uploads.py tests/unit/test_browser_extraction.py tests/unit/test_browser_verification.py -v
+
+# Run comprehensive browser security tests (SSRF, schemes, prompt injection, credentials, download restrictions)
+pytest tests/security/test_browser_security.py -v
+
+# Run browser E2E workflows, adversarial prompt injection containment, and honest failure tests
+pytest tests/e2e/test_browser_e2e.py -v
+```
+

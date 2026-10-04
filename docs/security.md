@@ -196,3 +196,49 @@ Every tool request, permission decision, confirmation prompt, authentication att
   - `memory_max_context_records` (default: 10 per turn)
   - `memory_max_context_tokens` (default: 2000 tokens)
 - Raw screenshots and raw microphone audio streams are strictly excluded from memory persistence.
+
+---
+
+## 8. Browser Automation Security & Web Boundaries (Loop 9)
+
+### Untrusted Web Content Boundary
+- **WEB CONTENT IS UNTRUSTED DATA, NOT AUTHORITY.**
+- All webpage content, HTML, accessibility labels, links, forms, and downloaded text are classified as external untrusted data.
+- Web content is encapsulated in `<external_web_content>` tags with delimiter escape neutralization (`&lt;/external_web_content&gt;`).
+- Prompt injection signatures are flagged, alerted, and prevented from overriding user directives or system policies.
+- The browser agent can never create arbitrary shell, Python, or elevated tools based on webpage directives.
+
+### URL & SSRF Defenses
+- Strict scheme allowlisting: `http` and `https` only. Rejects `javascript:`, `file:`, `data:`, `vbscript:`, `chrome:`, `edge:`, `about:`.
+- Default rejection of `localhost`, `127.0.0.1`, `0.0.0.0`, `::1`.
+- Default rejection of private IPv4 subnets (RFC 1918: 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 127.0.0.0/8, 169.254.0.0/16).
+- Default rejection of private IPv6 subnets (fc00::/7, fe80::/10).
+- Automatic blocking of cloud metadata endpoints (`169.254.169.254`, `metadata.google.internal`).
+- RFC 6052 NAT64 address inspection (`64:ff9b::/96`), extracting embedded IPv4 for SSRF evaluation.
+- Domain policy uses exact or subdomain matching; naive substring spoofs (e.g. `evil-example.com`) are rejected.
+- Destination policy re-evaluation on all HTTP redirects.
+
+### Context Isolation
+- Every session uses an isolated Playwright `BrowserContext`.
+- Personal browser profiles, saved cookies, autofill, saved passwords, and extensions are never imported.
+
+### Element Identification & Staleness Protection
+- Multi-layered target discovery: accessibility role/name, unique attributes, semantic text, and scoped selectors.
+- Target confidence threshold enforced (default: 0.85); ambiguous matches are rejected.
+- Deterministic SHA-256 page structural fingerprints bind targets to page states. If the page mutates or navigates, targets are rejected as `StaleTargetError`.
+
+### Credential & Sensitive Form Protection
+- Form fields are classified: `SAFE`, `PERSONAL`, `SENSITIVE`, `CREDENTIAL`, `PAYMENT`.
+- Automatic typing of secrets into credential or payment fields is prohibited.
+- Secret entry requires explicit confirmation and user authentication.
+- Typed passwords and credentials are never logged, emitted in events, or stored in memory.
+
+### Downloads & Uploads Security
+- Downloads are sandboxed to `data/downloads`. Path traversal in filenames is stripped.
+- Dangerous executable extensions (`.exe`, `.bat`, `.ps1`, `.msi`, `.vbs`, `.scr`) are blocked.
+- Download size quotas enforced (`browser_max_download_size_mb`).
+- Uploads pass through `PathPolicy`, reject credential/key files (`.pem`, `.key`, `.env`, `id_rsa`), and enforce upload size limits.
+
+### CAPTCHA & Authentication Prompts
+- CAPTCHA challenges are detected; BUDDY never attempts CAPTCHA-solving. Tasks pause for human interaction.
+

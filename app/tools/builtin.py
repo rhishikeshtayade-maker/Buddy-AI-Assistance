@@ -32,6 +32,7 @@ from app.tools.system import (
 )
 
 if TYPE_CHECKING:
+    from app.browser.service import BrowserService
     from app.security.interaction_policy import InteractionPolicy
     from app.security.path_policy import PathPolicy
 
@@ -42,6 +43,8 @@ def register_builtin_tools(
     registry: ToolRegistry,
     path_policy: Optional[PathPolicy] = None,
     interaction_policy: Optional[InteractionPolicy] = None,
+    browser_service: Optional[BrowserService] = None,
+    include_browser: bool = False,
 ) -> None:
     """Register all standard built-in tools with the registry."""
     from app.security.interaction_policy import InteractionPolicy
@@ -75,5 +78,12 @@ def register_builtin_tools(
     registry.register_tool(MouseScrollTool(ipolicy))
     registry.register_tool(KeyPressTool(ipolicy))
     registry.register_tool(TypeTextTool(ipolicy))
+
+    # Browser Automation Controls (Loop 9)
+    if browser_service or include_browser:
+        from app.browser.registry import register_browser_tools
+        from app.browser.service import BrowserService
+        bs = browser_service or BrowserService(path_policy=policy)
+        register_browser_tools(registry, bs)
 
     logger.info("Registered all builtin tools (%d total)", len(registry.list_tools()))

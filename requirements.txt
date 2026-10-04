@@ -22,6 +22,9 @@ pyaudio>=0.2.14
 # Cloud AI Provider (Loop 3)
 httpx>=0.27.0
 
+# Browser Automation (Loop 9)
+playwright>=1.40.0
+
 # Optional / Future Loop Dependencies (Uncomment as needed per loop):
 # PySide6>=6.7.0           # Desktop UI (Loop 20)
 # pillow>=10.3.0           # Screenshot & Vision (Loop 17)

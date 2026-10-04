@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Any, Dict, Literal, Optional, Set
+from typing import Any, Dict, List, Literal, Optional, Set
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -213,6 +213,84 @@ class BuddyConfig(BaseSettings):
         validation_alias="MEMORY_SECRET_DETECTION_ENABLED",
     )
 
+    # Browser Automation Settings (Loop 9)
+    browser_enabled: bool = Field(
+        default=True,
+        validation_alias="BROWSER_ENABLED",
+    )
+    browser_engine: str = Field(
+        default="chromium",
+        validation_alias="BROWSER_ENGINE",
+    )
+    browser_headless: bool = Field(
+        default=True,
+        validation_alias="BROWSER_HEADLESS",
+    )
+    browser_session_timeout_seconds: float = Field(
+        default=300.0,
+        validation_alias="BROWSER_SESSION_TIMEOUT_SECONDS",
+    )
+    browser_action_timeout_seconds: float = Field(
+        default=15.0,
+        validation_alias="BROWSER_ACTION_TIMEOUT_SECONDS",
+    )
+    browser_navigation_timeout_seconds: float = Field(
+        default=30.0,
+        validation_alias="BROWSER_NAVIGATION_TIMEOUT_SECONDS",
+    )
+    browser_max_tabs: int = Field(
+        default=5,
+        validation_alias="BROWSER_MAX_TABS",
+    )
+    browser_max_actions: int = Field(
+        default=50,
+        validation_alias="BROWSER_MAX_ACTIONS",
+    )
+    browser_max_download_size_mb: int = Field(
+        default=25,
+        validation_alias="BROWSER_MAX_DOWNLOAD_SIZE_MB",
+    )
+    browser_max_upload_size_mb: int = Field(
+        default=10,
+        validation_alias="BROWSER_MAX_UPLOAD_SIZE_MB",
+    )
+    browser_max_page_text_chars: int = Field(
+        default=20000,
+        validation_alias="BROWSER_MAX_PAGE_TEXT_CHARS",
+    )
+    browser_max_dom_nodes: int = Field(
+        default=500,
+        validation_alias="BROWSER_MAX_DOM_NODES",
+    )
+    browser_min_target_confidence: float = Field(
+        default=0.85,
+        validation_alias="BROWSER_MIN_TARGET_CONFIDENCE",
+    )
+    browser_allow_localhost: bool = Field(
+        default=False,
+        validation_alias="BROWSER_ALLOW_LOCALHOST",
+    )
+    browser_allow_private_networks: bool = Field(
+        default=False,
+        validation_alias="BROWSER_ALLOW_PRIVATE_NETWORKS",
+    )
+    browser_allowed_domains: List[str] = Field(
+        default_factory=list,
+        validation_alias="BROWSER_ALLOWED_DOMAINS",
+    )
+    browser_blocked_domains: List[str] = Field(
+        default_factory=list,
+        validation_alias="BROWSER_BLOCKED_DOMAINS",
+    )
+    browser_screenshot_enabled: bool = Field(
+        default=True,
+        validation_alias="BROWSER_SCREENSHOT_ENABLED",
+    )
+    browser_download_dir: Path = Field(
+        default=Path("data/downloads"),
+        validation_alias="BROWSER_DOWNLOAD_DIR",
+    )
+
     @classmethod
     def load_from_env(cls, env_file: Optional[str] = None) -> BuddyConfig:
         """Load configuration respecting BUDDY_ prefixed fallbacks and explicit env file."""
@@ -264,6 +342,25 @@ class BuddyConfig(BaseSettings):
             "BUDDY_MEMORY_INFERRED_TTL_DAYS": "MEMORY_INFERRED_TTL_DAYS",
             "BUDDY_MEMORY_REQUIRE_CONFIRMATION": "MEMORY_REQUIRE_CONFIRMATION",
             "BUDDY_MEMORY_SECRET_DETECTION_ENABLED": "MEMORY_SECRET_DETECTION_ENABLED",
+            "BUDDY_BROWSER_ENABLED": "BROWSER_ENABLED",
+            "BUDDY_BROWSER_ENGINE": "BROWSER_ENGINE",
+            "BUDDY_BROWSER_HEADLESS": "BROWSER_HEADLESS",
+            "BUDDY_BROWSER_SESSION_TIMEOUT_SECONDS": "BROWSER_SESSION_TIMEOUT_SECONDS",
+            "BUDDY_BROWSER_ACTION_TIMEOUT_SECONDS": "BROWSER_ACTION_TIMEOUT_SECONDS",
+            "BUDDY_BROWSER_NAVIGATION_TIMEOUT_SECONDS": "BROWSER_NAVIGATION_TIMEOUT_SECONDS",
+            "BUDDY_BROWSER_MAX_TABS": "BROWSER_MAX_TABS",
+            "BUDDY_BROWSER_MAX_ACTIONS": "BROWSER_MAX_ACTIONS",
+            "BUDDY_BROWSER_MAX_DOWNLOAD_SIZE_MB": "BROWSER_MAX_DOWNLOAD_SIZE_MB",
+            "BUDDY_BROWSER_MAX_UPLOAD_SIZE_MB": "BROWSER_MAX_UPLOAD_SIZE_MB",
+            "BUDDY_BROWSER_MAX_PAGE_TEXT_CHARS": "BROWSER_MAX_PAGE_TEXT_CHARS",
+            "BUDDY_BROWSER_MAX_DOM_NODES": "BROWSER_MAX_DOM_NODES",
+            "BUDDY_BROWSER_MIN_TARGET_CONFIDENCE": "BROWSER_MIN_TARGET_CONFIDENCE",
+            "BUDDY_BROWSER_ALLOW_LOCALHOST": "BROWSER_ALLOW_LOCALHOST",
+            "BUDDY_BROWSER_ALLOW_PRIVATE_NETWORKS": "BROWSER_ALLOW_PRIVATE_NETWORKS",
+            "BUDDY_BROWSER_ALLOWED_DOMAINS": "BROWSER_ALLOWED_DOMAINS",
+            "BUDDY_BROWSER_BLOCKED_DOMAINS": "BROWSER_BLOCKED_DOMAINS",
+            "BUDDY_BROWSER_SCREENSHOT_ENABLED": "BROWSER_SCREENSHOT_ENABLED",
+            "BUDDY_BROWSER_DOWNLOAD_DIR": "BROWSER_DOWNLOAD_DIR",
         }
 
         for buddy_var, core_var in alias_map.items():
@@ -321,3 +418,6 @@ class BuddyConfig(BaseSettings):
                 safe[k] = v
 
         return safe
+
+
+BuddyConfig.model_rebuild()
