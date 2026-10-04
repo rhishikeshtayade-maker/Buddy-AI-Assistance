@@ -20,8 +20,8 @@ INJECTION_PATTERNS: List[Tuple[str, re.Pattern]] = [
     ("ignore_instructions", re.compile(r"ignore\s+(all\s+)?(previous|prior)\s+instructions", re.IGNORECASE)),
     ("api_key_extraction", re.compile(r"(give|send|reveal|leak|exfiltrate|show)\s+(me\s+)?(your\s+)?api[_\s-]?key", re.IGNORECASE)),
     ("powershell_execution", re.compile(r"(run|execute|launch)\s+powershell(\.exe)?", re.IGNORECASE)),
-    ("credential_upload", re.compile(r"(upload|send|transmit)\s+(your\s+)?(credentials|password|passwords\.txt|id_rsa)", re.IGNORECASE)),
-    ("security_override", re.compile(r"(disable|bypass|turn\s+off)\s+(all\s+)?security(\s+policy)?", re.IGNORECASE)),
+    ("credential_upload", re.compile(r"(upload|send|transmit)\s+.*?(credentials|password|passwords\.txt|id_rsa)", re.IGNORECASE)),
+    ("security_override", re.compile(r"(disable|bypass|turn\s+off)\s+(all\s+|buddy\s+)?security(\s+policy)?", re.IGNORECASE)),
     ("hidden_admin_action", re.compile(r"(click|press)\s+the\s+hidden\s+admin", re.IGNORECASE)),
     ("roleplay_override", re.compile(r"you\s+are\s+no\s+longer\s+(buddy|an\s+assistant)", re.IGNORECASE)),
     ("system_prompt_leak", re.compile(r"(output|repeat|print)\s+(your\s+)?(system\s+prompt|core\s+directives)", re.IGNORECASE)),
@@ -39,7 +39,7 @@ class WebContentSanitizer:
         if not text:
             return ""
 
-        limit = max_chars or self._config.browser_max_page_text_chars
+        limit = max_chars or min(self._config.browser_max_page_text_chars, self._config.max_page_text_chars)
         # Normalize whitespace
         cleaned = re.sub(r"[ \t]+", " ", text)
         cleaned = re.sub(r"\n{3,}", "\n\n", cleaned).strip()

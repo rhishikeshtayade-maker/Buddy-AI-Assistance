@@ -60,13 +60,33 @@ class E2EServerHandler(http.server.SimpleHTTPRequestHandler):
     def do_GET(self) -> None:
         if self.path == "/captcha":
             body = CAPTCHA_PAGE.encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        elif self.path == "/redirect-allowed":
+            self.send_response(302)
+            self.send_header("Location", "/")
+            self.end_headers()
+        elif self.path == "/redirect-blocked":
+            self.send_response(302)
+            self.send_header("Location", "http://169.254.169.254/latest/meta-data")
+            self.end_headers()
+        elif self.path == "/upload-form":
+            body = b"<!DOCTYPE html><html><body><form><input type='file' id='file-input'></form></body></html>"
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
         else:
             body = HOSTILE_PAGE.encode("utf-8")
-        self.send_response(200)
-        self.send_header("Content-Type", "text/html; charset=utf-8")
-        self.send_header("Content-Length", str(len(body)))
-        self.end_headers()
-        self.wfile.write(body)
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
 
     def log_message(self, format: str, *args: Any) -> None:
         pass
@@ -174,6 +194,174 @@ class TestBrowserE2E(unittest.IsolatedAsyncioTestCase):
 
         self.assertTrue(page_info.has_captcha)
         # BUDDY detects CAPTCHA and does NOT attempt to solve or bypass it
+        await self.browser_service.close_session(session.session_id)
+
+    async def test_task_cancellation_lifecycle(self):
+        """Test cancellation stops actions, audits cancellation, and never claims false success."""
+        import asyncio
+
+        # 1. Start browser session
+        session = await self.browser_service.open_session()
+        await self.browser_service.navigate(self.base_url, session_id=session.session_id)
+
+        # 2. Launch long bounded wait action in asyncio task
+        wait_task = asyncio.create_task(
+            self.browser_service.wait(
+                operation="duration",
+                seconds=5.0,
+                session_id=session.session_id,
+            )
+        )
+
+        # Give it a brief moment to begin running
+        await asyncio.sleep(0.05)
+
+        # 3. Cancel the task
+        wait_task.cancel()
+
+        # 4. Verify task handles cancellation without claiming success
+        try:
+            res = await wait_task
+            self.assertFalse(res.success)
+            self.assertEqual(res.status, "cancelled")
+        except asyncio.CancelledError:
+            # Cancellation cleanly caught
+            pass
+
+        # 5. Clean up session and verify session is closed
+        closed = await self.browser_service.close_session(session.session_id, reason="task_cancelled")
+        self.assertTrue(closed)
+
+    async def test_popup_new_tab_security(self):
+        """New tabs/popups are independently tracked, policy-checked, and fingerprinted."""
+        session = await self.browser_service.open_session()
+
+        # Tab 1: base url
+        tab1 = await self.browser_service.new_tab(session_id=session.session_id, url=self.base_url)
+        self.assertEqual(tab1.url.rstrip("/"), self.base_url.rstrip("/"))
+
+        # Tab 2: independently tracked
+        tab2 = await self.browser_service.new_tab(session_id=session.session_id, url=f"{self.base_url}/captcha")
+        self.assertNotEqual(tab1.tab_id, tab2.tab_id)
+
+        # Disallowed navigation on new tab is blocked
+        with self.assertRaises(Exception):
+            await self.browser_service.new_tab(session_id=session.session_id, url="javascript:alert(1)")
+
+        await self.browser_service.close_session(session.session_id)
+
+    async def test_redirect_security_e2e(self):
+        """Redirects to permitted destinations pass; redirects to blocked SSRF destinations fail."""
+        from app.browser.exceptions import BrowserNavigationError, BrowserSecurityError
+
+        session = await self.browser_service.open_session()
+
+        # 1. Allowed redirect: /redirect-allowed -> /
+        info = await self.browser_service.navigate(
+            f"{self.base_url}/redirect-allowed",
+            session_id=session.session_id,
+        )
+        self.assertIn("127.0.0.1", info.url)
+
+        # 2. Blocked redirect: /redirect-blocked -> 169.254.169.254
+        with self.assertRaises((BrowserSecurityError, BrowserNavigationError)):
+            await self.browser_service.navigate(
+                f"{self.base_url}/redirect-blocked",
+                session_id=session.session_id,
+            )
+
+        await self.browser_service.close_session(session.session_id)
+
+    async def test_upload_tool_security_e2e(self):
+        """Upload tool executes through ToolExecutor with path policy and confirmation."""
+        import tempfile
+        from pathlib import Path
+        from app.security.path_policy import PathPolicy
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            # Update path policy to include temp dir
+            self.browser_service._upload_mgr._path_policy = PathPolicy(allowed_roots=[root])
+
+            session = await self.browser_service.open_session()
+            await self.browser_service.navigate(f"{self.base_url}/upload-form", session_id=session.session_id)
+
+            # 1. Safe text file upload requires confirmation first
+            safe_doc = root / "sample.txt"
+            safe_doc.write_text("Hello attachment")
+            req = ToolRequest(
+                tool_name="browser.upload",
+                arguments={
+                    "file_path": str(safe_doc),
+                    "selector": "#file-input",
+                    "session_id": session.session_id,
+                },
+            )
+            res1 = await self.tool_executor.execute(req)
+            self.assertEqual(res1.status.value, "confirmation_required")
+            self.assertIn("confirmation_token", res1.metadata)
+
+            # Confirm and execute
+            token = res1.metadata["confirmation_token"]
+            res2 = await self.tool_executor.execute(req, confirmation_token=token)
+            self.assertTrue(res2.success)
+            self.assertTrue(res2.verified)
+
+            # 2. Prohibited private key file upload rejected even with confirmation
+            key_file = root / "id_rsa"
+            key_file.write_text("PRIVATE KEY")
+            req_key = ToolRequest(
+                tool_name="browser.upload",
+                arguments={
+                    "file_path": str(key_file),
+                    "selector": "#file-input",
+                    "session_id": session.session_id,
+                },
+            )
+            res_k1 = await self.tool_executor.execute(req_key)
+            if res_k1.metadata and "confirmation_token" in res_k1.metadata:
+                res_k2 = await self.tool_executor.execute(req_key, confirmation_token=res_k1.metadata["confirmation_token"])
+                self.assertFalse(res_k2.success)
+            else:
+                self.assertFalse(res_k1.success)
+
+            await self.browser_service.close_session(session.session_id)
+
+    async def test_stale_target_invalidation_lifecycle(self):
+        """DOM mutation, navigation, tab switch, and reload invalidate previously captured targets."""
+        session = await self.browser_service.open_session()
+        await self.browser_service.navigate(self.base_url, session_id=session.session_id)
+
+        target = await self.browser_service.find_element(
+            query="Safe Action",
+            role="button",
+            session_id=session.session_id,
+        )
+        self.assertIsNotNone(target)
+
+        # 1. Target is valid initially
+        self.browser_service._target_resolver.validate_target_staleness(
+            target=target,
+            current_fingerprint=target.page_fingerprint,
+            current_url=self.base_url,
+        )
+
+        # 2. Invalidate on navigation
+        with self.assertRaises(Exception):
+            self.browser_service._target_resolver.validate_target_staleness(
+                target=target,
+                current_fingerprint=target.page_fingerprint,
+                current_url=f"{self.base_url}/new-path",
+            )
+
+        # 3. Invalidate on DOM mutation / reload fingerprint change
+        with self.assertRaises(Exception):
+            self.browser_service._target_resolver.validate_target_staleness(
+                target=target,
+                current_fingerprint="mutated_dom_fingerprint_123",
+                current_url=self.base_url,
+            )
+
         await self.browser_service.close_session(session.session_id)
 
 

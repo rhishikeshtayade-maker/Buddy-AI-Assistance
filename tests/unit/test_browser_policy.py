@@ -127,6 +127,24 @@ class TestBrowserPolicy(unittest.TestCase):
         with self.assertRaises(BrowserSecurityError):
             policy.validate_redirect("https://example.com/login", "https://evil.com/phish")
 
+    def test_redirect_chain_limit_enforcement(self):
+        cfg = BrowserConfig(max_navigation_redirects=3, browser_allow_localhost=True)
+        policy = BrowserPolicy(cfg)
+
+        # 1 to 3 redirects: OK
+        self.assertEqual(
+            policy.validate_redirect("http://127.0.0.1:8000/1", "http://127.0.0.1:8000/2", redirect_count=1),
+            "http://127.0.0.1:8000/2",
+        )
+        self.assertEqual(
+            policy.validate_redirect("http://127.0.0.1:8000/2", "http://127.0.0.1:8000/3", redirect_count=3),
+            "http://127.0.0.1:8000/3",
+        )
+
+        # 4th redirect exceeds max_navigation_redirects (3)
+        with self.assertRaises(BrowserSecurityError):
+            policy.validate_redirect("http://127.0.0.1:8000/3", "http://127.0.0.1:8000/4", redirect_count=4)
+
 
 if __name__ == "__main__":
     unittest.main()

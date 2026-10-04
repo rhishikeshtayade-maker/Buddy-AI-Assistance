@@ -208,13 +208,35 @@ All browser automation tools flow through `ToolRegistry` and `ToolExecutor`. The
 | `browser.scroll` | SAFE | NONE | No | 10.0s | Scroll active page (up or down). |
 | `browser.extract_text` | SAFE | NONE | No | 15.0s | Extract visible text, bounded and wrapped in security tags. |
 | `browser.screenshot` | SAFE | NONE | No | 15.0s | In-memory base64 screenshot of active browser tab. |
-| `browser.download` | MODERATE | CONFIRM | Yes | 60.0s | Download file to sandboxed directory. Blocks `.exe`/`.bat`/`.ps1`. |
-| `browser.upload` | MODERATE | CONFIRM | Yes | 30.0s | Upload sandboxed local file. Rejects `.key`/`.pem`/`.env`. |
-| `browser.wait` | SAFE | NONE | No | 15.0s | Wait bounded duration (up to 10 seconds). |
+| `browser.download` | MODERATE | CONFIRM | Yes | 60.0s | Download file to sandboxed directory. Blocks `.exe`/`.msi`/`.bat`/`.ps1`/`.vbs`/`.reg`. |
+| `browser.upload` | MODERATE | CONFIRM | Yes | 30.0s | Attach validated local file via PathPolicy. Rejects `.key`/`.pem`/`.env`/`id_rsa`/`.exe`/`.bat`. Requires confirmation. |
+| `browser.wait` | SAFE | NONE | No | 15.0s | Bounded wait (`wait_for_selector`, `wait_for_navigation`, `wait_for_load_state`, `duration`). Hard capped at 10.0s. Supports cancellation. |
 
-### Security Gating & Verification Contract
-- `ToolExecutor` validates input schemas with Pydantic `extra="forbid"`.
-- Browser actions re-evaluate URLs against `BrowserPolicy` on redirects.
-- Every state-changing action triggers post-execution empirical verification.
-- Passwords and sensitive input values are redacted from logs, events, and audit trails.
+### Browser Keyboard Allowlist
+Only explicitly allowlisted navigation and standard control keys are permitted via `browser.press_key`:
+- `ENTER`, `ESC` (or `ESCAPE`), `TAB`, `BACKSPACE`, `SPACE`
+- `ARROW_UP`, `ARROW_DOWN`, `ARROW_LEFT`, `ARROW_RIGHT`
+- `HOME`, `END`, `PAGE_UP`, `PAGE_DOWN`
+
+Arbitrary shortcut combinations (e.g. `CTRL+C`, `ALT+F4`, `F12`, `WINDOWS`, `COMMAND`) are strictly rejected.
+
+### Bounded Task Limits
+All browser actions enforce strict, fail-closed thresholds:
+- `max_browser_actions_per_task`: Maximum browser actions permitted per task (default: 50). Exceeding raises `BrowserSecurityError`.
+- `max_browser_tabs`: Maximum concurrent open tabs (default: 5). Exceeding raises `BrowserTabError`.
+- `max_browser_download_size_mb`: Maximum download file size (default: 25 MB). Exceeding raises `BrowserDownloadError` and unlinks oversized file.
+- `max_browser_upload_size_mb`: Maximum upload file size (default: 10 MB). Exceeding raises `BrowserUploadError`.
+- `max_page_text_chars`: Maximum page text characters returned to AI (default: 20,000). Safely truncated with notification.
+- `max_dom_nodes`: Maximum inspected DOM nodes (default: 500).
+- `max_accessibility_nodes`: Maximum parsed accessibility tree nodes (default: 300).
+- `max_navigation_redirects`: Maximum HTTP redirect chain depth (default: 5). Exceeding raises `BrowserSecurityError`.
+- `max_browser_session_duration`: Maximum session duration before automatic expiration (default: 300s).
+- `max_browser_action_timeout`: Hard maximum timeout for individual browser action (default: 15.0s).
+
+### Cancellation & Isolation Lifecycle
+- **Cancellation**: Tasks can be cancelled at any point during execution or bounded wait. Pending operations terminate immediately, sessions are cleaned up cleanly, and `status="cancelled"` is returned without false success reporting.
+- **Popup & New-Tab Isolation**: Unexpected popups and newly opened tabs are independently tracked, policy-checked, and fingerprinted. They do not inherit trust from existing pages.
+- **Credential & Secret Protection**: Sensitive form fields (passwords, OTPs, PINs, CVVs, card numbers, API tokens, Authorization headers, session cookies) are classified as `CREDENTIAL` or `PAYMENT`. Automatic plaintext entry is strictly prohibited, secret values are never logged or stored in long-term memory, and input is redacted (`***REDACTED***`).
+- **Redirect Security**: Redirect chains are re-validated at every hop. Navigations redirecting from approved public domains into internal or cloud metadata IPs (e.g. `169.254.169.254`) are immediately rejected.
+- **Memory Isolation**: External web content is strictly quarantined inside `<external_web_content>` tags as untrusted data. It never creates authorization memories in Loop 8 memory or alters security privileges.
 

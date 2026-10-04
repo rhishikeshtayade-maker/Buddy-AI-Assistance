@@ -98,10 +98,16 @@ class BrowserService:
         self._extractor = PageExtractor(self._config, self._sanitizer)
         self._target_resolver = TargetResolver(min_confidence=self._config.browser_min_target_confidence)
         self._verifier = BrowserVerifier()
-        self._executor = BrowserExecutor(self._target_resolver, self._verifier, default_timeout=self._config.browser_action_timeout_seconds)
         self._screenshot_mgr = ScreenshotManager(self._config)
         self._download_mgr = DownloadManager(self._config)
         self._upload_mgr = UploadManager(self._config, path_policy)
+        self._executor = BrowserExecutor(
+            self._target_resolver,
+            self._verifier,
+            upload_mgr=self._upload_mgr,
+            config=self._config,
+            default_timeout=self._config.browser_action_timeout_seconds,
+        )
 
         self._sessions: Dict[str, BrowserSession] = {}
 
@@ -183,6 +189,8 @@ class BrowserService:
         return True
 
     async def new_tab(self, session_id: Optional[str] = None, url: str = "about:blank") -> BrowserTab:
+        if url and url != "about:blank":
+            self._policy.validate_url(url)
         session = self.get_session(session_id)
         tab = await session.new_tab(url)
         await self._publish(
@@ -561,14 +569,27 @@ class BrowserService:
 
     async def wait(
         self,
+        operation: str = "duration",
+        selector: Optional[str] = None,
+        url: Optional[str] = None,
+        load_state: Optional[str] = "load",
+        timeout_seconds: Optional[float] = None,
         seconds: float = 1.0,
         session_id: Optional[str] = None,
         tab_id: Optional[str] = None,
     ) -> BrowserActionResult:
         session = self.get_session(session_id)
+        effective_timeout = timeout_seconds if timeout_seconds is not None else seconds
         action = BrowserAction(
             action_type=BrowserActionType.WAIT,
-            arguments={"seconds": seconds},
+            arguments={
+                "operation": operation,
+                "selector": selector,
+                "url": url,
+                "load_state": load_state,
+                "timeout_seconds": effective_timeout,
+                "seconds": effective_timeout,
+            },
             session_id=session.session_id,
             tab_id=tab_id,
             risk_level=BrowserRiskLevel.SAFE,
@@ -693,8 +714,8 @@ class BrowserService:
         selector: Optional[str] = None,
         session_id: Optional[str] = None,
         tab_id: Optional[str] = None,
-    ) -> bool:
-        """Upload validated local file to browser file input element."""
+    ) -> BrowserActionResult:
+        """Upload validated local file to browser file input element through BrowserExecutor."""
         session = self.get_session(session_id)
         validated_file = self._upload_mgr.validate_upload_file(file_path)
 
@@ -706,22 +727,27 @@ class BrowserService:
             )
         )
 
-        tab = session.tab_manager.get_tab(tab_id) if tab_id else session.get_active_tab()
-        page = tab.page
-        elem_selector = target.selector if target else selector or "input[type='file']"
-
-        if page and hasattr(page, "set_input_files"):
-            await page.set_input_files(elem_selector, str(validated_file))
-
-        await self._publish(
-            BrowserUploadCompletedEvent(
-                session_id=session.session_id,
-                filename=validated_file.name,
-                target_id=target.target_id if target else elem_selector,
-            )
+        action = BrowserAction(
+            action_type=BrowserActionType.UPLOAD,
+            target=target,
+            arguments={"file_path": str(validated_file), "selector": selector},
+            session_id=session.session_id,
+            tab_id=tab_id,
+            risk_level=BrowserRiskLevel.MODERATE,
         )
 
-        return True
+        result = await self._executor.execute_action(session, action)
+
+        if result.success:
+            await self._publish(
+                BrowserUploadCompletedEvent(
+                    session_id=session.session_id,
+                    filename=validated_file.name,
+                    target_id=target.target_id if target else selector or "input[type='file']",
+                )
+            )
+
+        return result
 
     async def shutdown(self) -> None:
         """Close all open sessions and stop browser engine."""

@@ -262,6 +262,46 @@ class BuddyConfig(BaseSettings):
         default=500,
         validation_alias="BROWSER_MAX_DOM_NODES",
     )
+    max_dom_nodes: int = Field(
+        default=500,
+        validation_alias="MAX_DOM_NODES",
+    )
+    max_accessibility_nodes: int = Field(
+        default=300,
+        validation_alias="MAX_ACCESSIBILITY_NODES",
+    )
+    max_navigation_redirects: int = Field(
+        default=5,
+        validation_alias="MAX_NAVIGATION_REDIRECTS",
+    )
+    max_browser_session_duration: float = Field(
+        default=300.0,
+        validation_alias="MAX_BROWSER_SESSION_DURATION",
+    )
+    max_browser_action_timeout: float = Field(
+        default=15.0,
+        validation_alias="MAX_BROWSER_ACTION_TIMEOUT",
+    )
+    max_browser_tabs: int = Field(
+        default=5,
+        validation_alias="MAX_BROWSER_TABS",
+    )
+    max_browser_actions_per_task: int = Field(
+        default=50,
+        validation_alias="MAX_BROWSER_ACTIONS_PER_TASK",
+    )
+    max_browser_download_size_mb: int = Field(
+        default=25,
+        validation_alias="MAX_BROWSER_DOWNLOAD_SIZE_MB",
+    )
+    max_browser_upload_size_mb: int = Field(
+        default=10,
+        validation_alias="MAX_BROWSER_UPLOAD_SIZE_MB",
+    )
+    max_page_text_chars: int = Field(
+        default=20000,
+        validation_alias="MAX_PAGE_TEXT_CHARS",
+    )
     browser_min_target_confidence: float = Field(
         default=0.85,
         validation_alias="BROWSER_MIN_TARGET_CONFIDENCE",
@@ -361,6 +401,16 @@ class BuddyConfig(BaseSettings):
             "BUDDY_BROWSER_BLOCKED_DOMAINS": "BROWSER_BLOCKED_DOMAINS",
             "BUDDY_BROWSER_SCREENSHOT_ENABLED": "BROWSER_SCREENSHOT_ENABLED",
             "BUDDY_BROWSER_DOWNLOAD_DIR": "BROWSER_DOWNLOAD_DIR",
+            "BUDDY_MAX_DOM_NODES": "MAX_DOM_NODES",
+            "BUDDY_MAX_ACCESSIBILITY_NODES": "MAX_ACCESSIBILITY_NODES",
+            "BUDDY_MAX_NAVIGATION_REDIRECTS": "MAX_NAVIGATION_REDIRECTS",
+            "BUDDY_MAX_BROWSER_SESSION_DURATION": "MAX_BROWSER_SESSION_DURATION",
+            "BUDDY_MAX_BROWSER_ACTION_TIMEOUT": "MAX_BROWSER_ACTION_TIMEOUT",
+            "BUDDY_MAX_BROWSER_TABS": "MAX_BROWSER_TABS",
+            "BUDDY_MAX_BROWSER_ACTIONS_PER_TASK": "MAX_BROWSER_ACTIONS_PER_TASK",
+            "BUDDY_MAX_BROWSER_DOWNLOAD_SIZE_MB": "MAX_BROWSER_DOWNLOAD_SIZE_MB",
+            "BUDDY_MAX_BROWSER_UPLOAD_SIZE_MB": "MAX_BROWSER_UPLOAD_SIZE_MB",
+            "BUDDY_MAX_PAGE_TEXT_CHARS": "MAX_PAGE_TEXT_CHARS",
         }
 
         for buddy_var, core_var in alias_map.items():

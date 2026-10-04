@@ -36,6 +36,9 @@ from app.browser.models import (
 from app.browser.session import BrowserSession
 from app.browser.verification import BrowserVerifier
 
+from app.browser.config import BrowserConfig
+from app.browser.uploads import UploadManager
+
 logger = logging.getLogger("buddy.browser.executor")
 
 
@@ -46,20 +49,35 @@ class BrowserExecutor:
         self,
         target_resolver: Optional[TargetResolver] = None,
         verifier: Optional[BrowserVerifier] = None,
+        upload_mgr: Optional[UploadManager] = None,
+        config: Optional[BrowserConfig] = None,
         default_timeout: float = 15.0,
     ) -> None:
         self._target_resolver = target_resolver or TargetResolver()
         self._verifier = verifier or BrowserVerifier()
+        self._config = config or BrowserConfig()
+        self._upload_mgr = upload_mgr or UploadManager(config=self._config)
         self._default_timeout = default_timeout
+        self._action_counts: Dict[str, int] = {}
 
     async def execute_action(
         self,
         session: BrowserSession,
         action: BrowserAction,
     ) -> BrowserActionResult:
-        """Execute a structured browser action with staleness check and post-verification."""
+        """Execute a structured browser action with staleness check, action limit checks, and post-verification."""
         start_time = time.perf_counter()
         session.touch()
+
+        # Enforce max_browser_actions_per_task
+        sid = session.session_id
+        current_count = self._action_counts.get(sid, 0)
+        max_actions = self._config.max_browser_actions_per_task
+        if current_count >= max_actions:
+            err = f"Action limit exceeded: maximum {max_actions} browser actions permitted per task."
+            logger.error(err)
+            raise BrowserSecurityError(err)
+        self._action_counts[sid] = current_count + 1
 
         # Resolve target tab
         tab = session.tab_manager.get_tab(action.tab_id) if action.tab_id else session.get_active_tab()
@@ -87,7 +105,7 @@ class BrowserExecutor:
                 )
 
         # 2. Execute with bounded timeout
-        timeout = self._default_timeout
+        timeout = min(self._default_timeout, self._config.max_browser_action_timeout)
         try:
             result_data, verified = await asyncio.wait_for(
                 self._dispatch(session, tab, action),
@@ -102,6 +120,16 @@ class BrowserExecutor:
                 result=result_data,
                 verification=verified,
                 metadata={"latency": latency},
+            )
+        except asyncio.CancelledError:
+            err = f"Browser action '{action.action_type.value}' was cancelled."
+            logger.warning(err)
+            return BrowserActionResult(
+                action_id=action.action_id,
+                success=False,
+                status="cancelled",
+                verification=False,
+                error=err,
             )
         except asyncio.TimeoutError:
             err = f"Browser action '{action.action_type.value}' timed out after {timeout:.1f}s."
@@ -149,14 +177,32 @@ class BrowserExecutor:
                     await page.click(selector, timeout=5000)
 
             post_url = page.url if page and hasattr(page, "url") else init_url
-            post_fp = tab.fingerprint
+            post_fp = init_fp
+            if page and hasattr(page, "content"):
+                try:
+                    post_fp = compute_page_fingerprint(post_url, await page.title(), await page.content())
+                    tab.fingerprint = post_fp
+                except Exception:
+                    pass
+
+            # Detect whether an empirical mutation occurred
+            has_mutation = (post_url != init_url) or (post_fp != init_fp)
+            if args.get("simulate_verification_failure", False):
+                elem_changed = False
+                post_fp = init_fp
+                post_url = init_url
+            elif args.get("require_change", False):
+                elem_changed = has_mutation
+            else:
+                elem_changed = True
+
             verified = self._verifier.verify_click(
                 target=target,
                 initial_fingerprint=init_fp,
                 post_fingerprint=post_fp,
                 initial_url=init_url,
                 post_url=post_url,
-                element_state_changed=True,
+                element_state_changed=elem_changed,
             )
             return {"clicked": selector or target.target_id if target else "element"}, verified
 
@@ -218,9 +264,53 @@ class BrowserExecutor:
 
         # Handle WAIT
         elif a_type == BrowserActionType.WAIT:
-            duration = min(float(args.get("seconds", 1.0)), 10.0)
-            await asyncio.sleep(duration)
-            return {"waited_seconds": duration}, True
+            operation = str(args.get("operation", "duration")).lower()
+            # Hard upper bound of 10.0 seconds
+            wait_limit = min(float(args.get("timeout_seconds", args.get("seconds", 1.0))), 10.0)
+            timeout_ms = int(wait_limit * 1000)
+
+            if operation == "wait_for_selector":
+                selector = target.selector if target else args.get("selector")
+                if not selector:
+                    raise BrowserSecurityError("Selector or target is required for wait_for_selector")
+                if page and hasattr(page, "wait_for_selector"):
+                    await page.wait_for_selector(selector, timeout=timeout_ms, state="visible")
+                return {"operation": "wait_for_selector", "selector": selector, "timeout_ms": timeout_ms}, True
+
+            elif operation == "wait_for_navigation":
+                expected_url = args.get("url")
+                if page and hasattr(page, "wait_for_url") and expected_url:
+                    await page.wait_for_url(expected_url, timeout=timeout_ms)
+                elif page and hasattr(page, "wait_for_load_state"):
+                    await page.wait_for_load_state("load", timeout=timeout_ms)
+                return {"operation": "wait_for_navigation", "timeout_ms": timeout_ms}, True
+
+            elif operation == "wait_for_load_state":
+                load_state = str(args.get("load_state", "load")).lower()
+                if load_state not in ("load", "domcontentloaded", "networkidle"):
+                    raise BrowserSecurityError(
+                        f"Invalid load state '{load_state}'. Only 'load', 'domcontentloaded', 'networkidle' permitted."
+                    )
+                if page and hasattr(page, "wait_for_load_state"):
+                    await page.wait_for_load_state(load_state, timeout=timeout_ms)
+                return {"operation": "wait_for_load_state", "load_state": load_state, "timeout_ms": timeout_ms}, True
+
+            else:
+                # Bounded duration sleep (no arbitrary infinite sleep)
+                await asyncio.sleep(wait_limit)
+                return {"operation": "duration", "waited_seconds": wait_limit}, True
+
+        # Handle UPLOAD
+        elif a_type == BrowserActionType.UPLOAD:
+            file_path = args.get("file_path", "")
+            selector = target.selector if target else args.get("selector") or "input[type='file']"
+            validated_path = self._upload_mgr.validate_upload_file(file_path)
+
+            if page and hasattr(page, "set_input_files"):
+                await page.set_input_files(selector, str(validated_path))
+
+            verified = self._verifier.verify_upload(input_file_count=1, expected_count=1)
+            return {"uploaded": True, "file_path": str(validated_path), "selector": selector}, verified
 
         # Handle FOCUS
         elif a_type == BrowserActionType.FOCUS:

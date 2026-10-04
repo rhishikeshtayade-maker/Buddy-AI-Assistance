@@ -40,6 +40,23 @@ class TestBrowserUploads(unittest.TestCase):
         with self.assertRaises(BrowserUploadError):
             self.mgr.validate_upload_file(exe_file)
 
+        # Prohibited scripts
+        for ext in (".bat", ".cmd", ".ps1", ".vbs"):
+            script_file = self.root_path / f"script{ext}"
+            script_file.write_text("echo test")
+            with self.subTest(ext=ext):
+                with self.assertRaises(BrowserUploadError):
+                    self.mgr.validate_upload_file(script_file)
+
+    def test_private_key_and_env_rejection(self):
+        # .pem, .key, .env, id_rsa
+        for fname in ("id_rsa", "server.key", "cert.pem", ".env", "id_ed25519"):
+            sec_file = self.root_path / fname
+            sec_file.write_text("PRIVATE_KEY_CONTENT")
+            with self.subTest(file=fname):
+                with self.assertRaises(BrowserUploadError):
+                    self.mgr.validate_upload_file(sec_file)
+
     def test_path_traversal_rejection(self):
         outside_path = Path("C:/Windows/System32/drivers/etc/hosts")
         with self.assertRaises(BrowserUploadError):

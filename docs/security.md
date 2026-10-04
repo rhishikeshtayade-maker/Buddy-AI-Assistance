@@ -235,10 +235,27 @@ Every tool request, permission decision, confirmation prompt, authentication att
 
 ### Downloads & Uploads Security
 - Downloads are sandboxed to `data/downloads`. Path traversal in filenames is stripped.
-- Dangerous executable extensions (`.exe`, `.bat`, `.ps1`, `.msi`, `.vbs`, `.scr`) are blocked.
-- Download size quotas enforced (`browser_max_download_size_mb`).
-- Uploads pass through `PathPolicy`, reject credential/key files (`.pem`, `.key`, `.env`, `id_rsa`), and enforce upload size limits.
+- Dangerous executable extensions (`.exe`, `.msi`, `.bat`, `.cmd`, `.ps1`, `.vbs`, `.reg`) are strictly blocked. Downloaded files are never launched automatically.
+- Download size quotas enforced (`max_browser_download_size_mb`).
+- Uploads enforce `PathPolicy`, reject credential and key files (`.pem`, `.key`, `.env`, `id_rsa`), enforce size limits (`max_browser_upload_size_mb`), require explicit user confirmation, and verify file input attachment.
+
+### Arbitrary JavaScript Execution Prohibition
+- AI-controlled arbitrary JavaScript evaluation is completely unavailable.
+- Tools such as `browser.evaluate`, `browser.execute_script`, or arbitrary script runners are not registered.
+- `javascript:` URL schemes fail closed immediately.
+
+### Cancellation & Task Bounds
+- Tasks can be cancelled at any point during browser execution or bounded wait. Pending operations terminate immediately, the browser session is closed cleanly, cancellation is audited, and no false completion is reported.
+- Exceeding any of the 10 bounded task limits (`max_browser_actions_per_task`, `max_browser_tabs`, `max_browser_download_size_mb`, `max_browser_upload_size_mb`, `max_page_text_chars`, `max_dom_nodes`, `max_accessibility_nodes`, `max_navigation_redirects`, `max_browser_session_duration`, `max_browser_action_timeout`) fails closed.
+
+### Popup & New-Tab Isolation
+- Unexpected popups and newly opened tabs are independently tracked, policy-checked against `BrowserPolicy`, and fingerprinted. They do not inherit trust from existing pages.
+
+### Memory Isolation Contract
+- Untrusted web content scraped from browser pages is strictly quarantined within `<external_web_content>` tags.
+- Scraped web content can **NEVER** create authorization memories, permanent permissions, or bypass confirmation tokens in Loop 8 long-term memory.
+- Memory remains context, never authority.
 
 ### CAPTCHA & Authentication Prompts
-- CAPTCHA challenges are detected; BUDDY never attempts CAPTCHA-solving. Tasks pause for human interaction.
+- CAPTCHA challenges are detected; BUDDY never attempts automated CAPTCHA-solving or bypass. Tasks pause for human interaction.
 

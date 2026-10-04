@@ -16,8 +16,8 @@ from app.browser.models import FormField, FormFieldSensitivity
 logger = logging.getLogger("buddy.browser.dom")
 
 # Keywords for classifying sensitive input fields
-PASSWORD_KEYWORDS = {"password", "pass", "pwd", "passwd", "secret"}
-OTP_KEYWORDS = {"otp", "token", "2fa", "mfa", "passcode", "authcode", "verification_code", "security_code", "pin"}
+PASSWORD_KEYWORDS = {"password", "pass", "pwd", "passwd", "secret", "api_key", "apikey", "auth", "bearer", "cookie", "session"}
+OTP_KEYWORDS = {"otp", "token", "2fa", "mfa", "passcode", "authcode", "verification_code", "security_code", "pin", "session_id"}
 PAYMENT_KEYWORDS = {"card", "creditcard", "cardnumber", "cvv", "cvc", "csc", "expmonth", "expyear", "billing"}
 PERSONAL_KEYWORDS = {"email", "phone", "telephone", "mobile", "ssn", "socialsecurity", "dob", "birthdate"}
 SEARCH_KEYWORDS = {"search", "q", "query", "find", "keyword", "filter"}

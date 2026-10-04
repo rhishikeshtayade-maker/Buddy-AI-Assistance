@@ -166,8 +166,8 @@ pytest tests/e2e/test_memory_e2e.py -v
 # Run the real Windows browser smoke test (local deterministic test page, click, type, tabs, downloads)
 python -m app.browser.smoke_test_browser
 
-# Run all 10 browser unit test suites
-pytest tests/unit/test_browser_models.py tests/unit/test_browser_policy.py tests/unit/test_browser_session.py tests/unit/test_browser_dom.py tests/unit/test_browser_accessibility.py tests/unit/test_browser_actions.py tests/unit/test_browser_downloads.py tests/unit/test_browser_uploads.py tests/unit/test_browser_extraction.py tests/unit/test_browser_verification.py -v
+# Run all 11 browser unit test suites (models, policy, session, dom, accessibility, actions, downloads, uploads, extraction, verification, limits)
+pytest tests/unit/test_browser_models.py tests/unit/test_browser_policy.py tests/unit/test_browser_session.py tests/unit/test_browser_dom.py tests/unit/test_browser_accessibility.py tests/unit/test_browser_actions.py tests/unit/test_browser_downloads.py tests/unit/test_browser_uploads.py tests/unit/test_browser_extraction.py tests/unit/test_browser_verification.py tests/unit/test_browser_limits.py -v
 
 # Run comprehensive browser security tests (SSRF, schemes, prompt injection, credentials, download restrictions)
 pytest tests/security/test_browser_security.py -v

@@ -266,10 +266,15 @@ class BrowserPolicy:
             # If DNS fails here, it might be an internal test hostname or offline mock;
             # allow standard Playwright to attempt navigation or fail with navigation error
 
-    def validate_redirect(self, from_url: str, to_url: str) -> str:
-        """Re-validate destination URL after an HTTP redirect.
+    def validate_redirect(self, from_url: str, to_url: str, redirect_count: int = 1) -> str:
+        """Re-validate destination URL after an HTTP redirect and enforce max_navigation_redirects limit.
 
         Never inherits trust from the origin URL.
         """
-        logger.info("Re-evaluating redirect from '%s' to '%s'", from_url, to_url)
+        logger.info("Re-evaluating redirect #%d from '%s' to '%s'", redirect_count, from_url, to_url)
+        max_redirects = self._config.max_navigation_redirects
+        if redirect_count > max_redirects:
+            raise BrowserSecurityError(
+                f"Redirect chain limit exceeded: reached {redirect_count} redirects, maximum allowed is {max_redirects}."
+            )
         return self.validate_url(to_url)

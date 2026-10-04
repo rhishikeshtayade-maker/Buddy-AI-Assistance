@@ -96,7 +96,8 @@ class DownloadManager:
             raise BrowserDownloadError(f"Downloaded file '{file_path}' does not exist.")
 
         size_bytes = file_path.stat().st_size
-        max_bytes = self._config.browser_max_download_size_mb * 1024 * 1024
+        limit_mb = min(self._config.browser_max_download_size_mb, self._config.max_browser_download_size_mb)
+        max_bytes = limit_mb * 1024 * 1024
 
         if size_bytes > max_bytes:
             # Remove oversized file to protect disk space
@@ -105,7 +106,7 @@ class DownloadManager:
             except Exception:
                 pass
             raise BrowserDownloadError(
-                f"Downloaded file exceeded maximum allowed size of {self._config.browser_max_download_size_mb} MB "
+                f"Downloaded file exceeded maximum allowed size of {limit_mb} MB "
                 f"({size_bytes} bytes > {max_bytes} bytes)."
             )
 

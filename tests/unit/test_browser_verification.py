@@ -56,6 +56,28 @@ class TestBrowserVerification(unittest.TestCase):
                 post_url="https://example.com",
             )
         )
+        # Element state change
+        self.assertTrue(
+            self.verifier.verify_click(
+                target=target,
+                initial_fingerprint="fp1",
+                post_fingerprint="fp1",
+                initial_url="https://example.com",
+                post_url="https://example.com",
+                element_state_changed=True,
+            )
+        )
+        # Empirical failure when no state mutation occurs
+        self.assertFalse(
+            self.verifier.verify_click(
+                target=target,
+                initial_fingerprint="fp1",
+                post_fingerprint="fp1",
+                initial_url="https://example.com",
+                post_url="https://example.com",
+                element_state_changed=False,
+            )
+        )
 
     def test_verify_typing(self):
         target = BrowserTarget(

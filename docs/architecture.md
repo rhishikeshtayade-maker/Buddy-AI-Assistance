@@ -563,34 +563,40 @@ BUDDY includes a secure, policy-governed browser automation subsystem capable of
                          │
                          ▼
                   Audit Log & Event
-```
+`
 
 ### Key Subsystem Components:
-1. **Playwright Integration**: Drives Chromium or Microsoft Edge via async Playwright APIs.
+1. **Playwright Integration**: Drives Chromium or Microsoft Edge via async Playwright APIs. No arbitrary JavaScript execution is supported (`browser.evaluate` and `browser.execute_script` fail closed).
 2. **Context Isolation**: Every session launches with a clean automation profile (`BrowserContext`). Personal profiles, saved passwords, autofill, and personal cookies are never imported.
-3. **Session & Tab Management**: Tracks session inactivity timeouts (`browser_session_timeout_seconds`), active tab focus, and concurrent tab quotas (`browser_max_tabs`).
+3. **Session & Tab Management & Limits**: Tracks session inactivity timeouts (`max_browser_session_duration`), active tab focus, and concurrent tab quotas (`max_browser_tabs`, `max_browser_actions_per_task`, `max_dom_nodes`, `max_accessibility_nodes`, `max_navigation_redirects`, `max_browser_action_timeout`).
 4. **URL & SSRF Policy**:
    - Strictly permits `http` and `https`.
    - Rejects `javascript:`, `file:`, `data:`, `vbscript:`, `chrome:`, `edge:`, `about:`.
    - Blocks loopback (`127.0.0.1`, `localhost`), private networks (RFC 1918), link-local, and cloud metadata endpoints (`169.254.169.254`, `metadata.google.internal`).
    - Translates and validates RFC 6052 NAT64 IPv6 addresses.
-   - Re-evaluates destination policy on every HTTP redirect.
+   - Re-evaluates destination policy on every HTTP redirect up to `max_navigation_redirects`.
 5. **DOM & Accessibility Inspection**:
    - Extracts bounded visible text and WAI-ARIA accessibility trees.
-   - Generates deterministic structural SHA-256 page fingerprints to invalidate stale targets.
-6. **Prompt Injection Defense**:
+   - Generates deterministic structural SHA-256 page fingerprints to invalidate stale targets across DOM mutations, navigation, reloads, and tab switches.
+6. **Prompt Injection Defense & Memory Isolation**:
    - Scans extracted text for adversarial prompt injection patterns.
    - Wraps all extracted data in `<external_web_content>` tags with delimiter escape protection.
-7. **Sensitive Field Detection**:
-   - Detects password, PIN, OTP, and payment fields.
-   - Never automatically types secrets; requires elevated confirmation and authentication. Redacts credentials from logs and events.
+   - Webpage content is strictly untrusted context and never automatically creates Loop 8 long-term memory records or permission authority.
+7. **Sensitive Field & Credential Protection**:
+   - Detects password, username+password, PIN, OTP, CVV, credit card, API token, Authorization header, and cookie/session data fields.
+   - Sensitive values cannot be entered automatically, logged, stored in Loop 8 memory, or returned in ordinary tool output.
 8. **Controlled Downloads & Uploads**:
    - Downloads are contained within a dedicated sandboxed directory (`data/downloads`).
-   - Sanitizes filenames and blocks dangerous executable extensions (`.exe`, `.bat`, `.ps1`, `.msi`).
-   - Uploads enforce `PathPolicy`, reject credential/key files (`.pem`, `.key`, `.env`, `id_rsa`), and enforce size quotas.
-9. **CAPTCHA & Challenge Behavior**:
+   - Blocks dangerous executable and script extensions (`.exe`, `.msi`, `.bat`, `.cmd`, `.ps1`, `.vbs`, `.reg`) and enforces `max_browser_download_size_mb`. Never launches downloads automatically.
+   - Uploads enforce `PathPolicy`, allowed directories, path traversal prevention, file size limits (`max_browser_upload_size_mb`), explicit target binding, and sensitive upload confirmation tokens. Rejects `.exe`, `.pem`, `.key`, `.env`, `id_rsa`.
+9. **Controlled Bounded Wait**:
+   - `browser.wait` permits only bounded operations (`wait_for_selector`, `wait_for_navigation`, `wait_for_load_state`, bounded duration) with a hard maximum timeout. No arbitrary JavaScript polling or infinite sleep.
+10. **Keyboard Allowlist**:
+    - Only 13 safe navigation and editing keys permitted: `ENTER`, `ESC`, `TAB`, `BACKSPACE`, `SPACE`, `ARROW_UP`, `ARROW_DOWN`, `ARROW_LEFT`, `ARROW_RIGHT`, `HOME`, `END`, `PAGE_UP`, `PAGE_DOWN`. Arbitrary keyboard injection is strictly rejected.
+11. **Cancellation & Verification**:
+    - Supports task cancellation via standard asyncio task cancellation and cleanup. Cancellation halts pending actions, runs cleanup, audits the event, and ensures BUDDY reports failure rather than false success.
+    - Every state-changing action empirically verifies that the actual system state changed before reporting success. If the page does not change, `BrowserActionResult.success = False`.
+12. **CAPTCHA & Challenge Behavior**:
    - Detects CAPTCHA challenges (`recaptcha`, `hcaptcha`, `cf-turnstile`).
    - Never attempts to bypass or solve CAPTCHAs. Pauses task and requests human interaction.
-10. **Action Verification**:
-    - Every state-changing action (click, type, navigate, download, upload) verifies that the actual system state changed before reporting success.
 

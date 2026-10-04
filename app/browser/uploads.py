@@ -94,10 +94,11 @@ class UploadManager:
 
         # 4. Enforce upload size limit
         file_size = resolved_path.stat().st_size
-        max_bytes = self._config.browser_max_upload_size_mb * 1024 * 1024
+        limit_mb = min(self._config.browser_max_upload_size_mb, self._config.max_browser_upload_size_mb)
+        max_bytes = limit_mb * 1024 * 1024
         if file_size > max_bytes:
             raise BrowserUploadError(
-                f"Upload file size exceeds maximum limit of {self._config.browser_max_upload_size_mb} MB "
+                f"Upload file size exceeds maximum limit of {limit_mb} MB "
                 f"({file_size} bytes > {max_bytes} bytes)."
             )
 

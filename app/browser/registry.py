@@ -165,7 +165,16 @@ class BrowserUploadInput(BaseModel):
 
 
 class BrowserWaitInput(BaseModel):
-    seconds: float = 1.0
+    operation: str = Field(
+        default="duration",
+        description="Wait operation: 'wait_for_selector', 'wait_for_navigation', 'wait_for_load_state', or 'duration'",
+    )
+    selector: Optional[str] = Field(default=None, description="CSS selector or locator to wait for")
+    target_id: Optional[str] = Field(default=None, description="Target element identifier")
+    url: Optional[str] = Field(default=None, description="Target URL for navigation wait")
+    load_state: Optional[str] = Field(default="load", description="Target load state ('load', 'domcontentloaded', 'networkidle')")
+    timeout_seconds: Optional[float] = Field(default=None, ge=0.1, le=10.0, description="Max bounded timeout in seconds (capped at 10.0s)")
+    seconds: Optional[float] = Field(default=1.0, ge=0.1, le=10.0, description="Bounded duration in seconds if operation is duration")
     session_id: Optional[str] = None
     tab_id: Optional[str] = None
     model_config = {"extra": "forbid"}
@@ -776,7 +785,7 @@ class BrowserUploadTool(Tool):
     def definition(self) -> ToolDefinition:
         return ToolDefinition(
             name="browser.upload",
-            description="Attach a sandboxed local file to a file input element. Requires confirmation.",
+            description="Attach a validated sandboxed local file to a file input element. Requires confirmation.",
             input_schema=BrowserUploadInput.model_json_schema(),
             risk_level=ToolRiskLevel.MODERATE,
             permission_level=ToolPermissionLevel.CONFIRM,
@@ -788,16 +797,16 @@ class BrowserUploadTool(Tool):
         return BrowserUploadInput(**arguments).model_dump()
 
     async def execute(self, arguments: Dict[str, Any]) -> Dict[str, Any]:
-        ok = await self._service.upload(
+        res = await self._service.upload(
             file_path=arguments["file_path"],
             selector=arguments.get("selector"),
             session_id=arguments.get("session_id"),
             tab_id=arguments.get("tab_id"),
         )
-        return {"uploaded": ok, "file_path": arguments["file_path"]}
+        return res.model_dump()
 
     async def verify(self, arguments: Dict[str, Any], raw_output: Any) -> bool:
-        return isinstance(raw_output, dict) and raw_output.get("uploaded") is True
+        return isinstance(raw_output, dict) and raw_output.get("verification") is True
 
 
 class BrowserWaitTool(Tool):
@@ -808,7 +817,7 @@ class BrowserWaitTool(Tool):
     def definition(self) -> ToolDefinition:
         return ToolDefinition(
             name="browser.wait",
-            description="Wait for a specified duration (bounded to 10 seconds).",
+            description="Wait for selector, navigation, load state, or bounded duration (capped at 10 seconds).",
             input_schema=BrowserWaitInput.model_json_schema(),
             risk_level=ToolRiskLevel.SAFE,
             permission_level=ToolPermissionLevel.NONE,
@@ -821,7 +830,12 @@ class BrowserWaitTool(Tool):
 
     async def execute(self, arguments: Dict[str, Any]) -> Dict[str, Any]:
         res = await self._service.wait(
-            seconds=arguments.get("seconds", 1.0),
+            operation=arguments.get("operation", "duration"),
+            selector=arguments.get("selector"),
+            url=arguments.get("url"),
+            load_state=arguments.get("load_state", "load"),
+            timeout_seconds=arguments.get("timeout_seconds"),
+            seconds=arguments.get("seconds", 1.0) or 1.0,
             session_id=arguments.get("session_id"),
             tab_id=arguments.get("tab_id"),
         )

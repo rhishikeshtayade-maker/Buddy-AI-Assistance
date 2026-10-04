@@ -28,16 +28,47 @@ from app.browser.session import BrowserSession
 
 class TestBrowserActions(unittest.IsolatedAsyncioTestCase):
     def test_key_allowlist(self):
-        # Valid allowlisted keys
-        self.assertEqual(validate_key_name("ENTER"), "Enter")
-        self.assertEqual(validate_key_name("Tab"), "Tab")
-        self.assertEqual(validate_key_name("escape"), "Escape")
-        self.assertEqual(validate_key_name("ARROW_DOWN"), "ArrowDown")
+        # Explicit test for every single permitted key required by Loop 9
+        permitted_keys = [
+            ("ENTER", "Enter"),
+            ("ESC", "Escape"),
+            ("TAB", "Tab"),
+            ("BACKSPACE", "Backspace"),
+            ("SPACE", " "),
+            ("ARROW_UP", "ArrowUp"),
+            ("ARROW_DOWN", "ArrowDown"),
+            ("ARROW_LEFT", "ArrowLeft"),
+            ("ARROW_RIGHT", "ArrowRight"),
+            ("HOME", "Home"),
+            ("END", "End"),
+            ("PAGE_UP", "PageUp"),
+            ("PAGE_DOWN", "PageDown"),
+        ]
+        for raw_key, expected_mapped in permitted_keys:
+            with self.subTest(permitted_key=raw_key):
+                self.assertEqual(validate_key_name(raw_key), expected_mapped)
+                # Case-insensitive validation
+                self.assertEqual(validate_key_name(raw_key.lower()), expected_mapped)
 
-        # Prohibited keys
-        prohibited = ["CTRL+C", "ALT+F4", "F12", "WINDOWS", "PRINTSCREEN", "COMMAND"]
+        # Prohibited keys that must be strictly rejected
+        prohibited = [
+            "CTRL+C",
+            "ALT+F4",
+            "F12",
+            "WINDOWS",
+            "PRINTSCREEN",
+            "COMMAND",
+            "INSERT",
+            "F1",
+            "F5",
+            "META",
+            "CONTROL",
+            "ALT",
+            "SHIFT",
+            "SUPER",
+        ]
         for key in prohibited:
-            with self.subTest(key=key):
+            with self.subTest(prohibited_key=key):
                 with self.assertRaises(BrowserSecurityError):
                     validate_key_name(key)
 
@@ -141,6 +172,115 @@ class TestBrowserActions(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(res.success)
         self.assertTrue(res.verification)
         mock_page.click.assert_awaited_once_with("#btn", timeout=5000)
+
+    async def test_executor_verification_failure(self):
+        executor = BrowserExecutor()
+
+        mock_page = MagicMock()
+        mock_page.url = "https://example.com"
+        mock_page.click = AsyncMock()
+
+        mock_session = MagicMock()
+        mock_session.touch = MagicMock()
+        mock_tab = MagicMock()
+        mock_tab.page = mock_page
+        mock_tab.url = "https://example.com"
+        mock_tab.fingerprint = "fp1"
+        mock_session.get_active_tab.return_value = mock_tab
+        mock_session.tab_manager.get_tab.return_value = mock_tab
+
+        action = BrowserAction(
+            action_type=BrowserActionType.CLICK,
+            session_id="s_fail",
+            arguments={"selector": "#btn", "simulate_verification_failure": True},
+        )
+
+        res = await executor.execute_action(mock_session, action)
+        self.assertFalse(res.success)
+        self.assertFalse(res.verification)
+        self.assertEqual(res.status, "verification_failed")
+
+    async def test_bounded_wait_operations(self):
+        executor = BrowserExecutor()
+
+        mock_page = MagicMock()
+        mock_page.wait_for_selector = AsyncMock()
+        mock_page.wait_for_load_state = AsyncMock()
+        mock_page.wait_for_url = AsyncMock()
+
+        mock_session = MagicMock()
+        mock_session.session_id = "s_wait"
+        mock_session.touch = MagicMock()
+        mock_tab = MagicMock()
+        mock_tab.page = mock_page
+        mock_session.get_active_tab.return_value = mock_tab
+        mock_session.tab_manager.get_tab.return_value = mock_tab
+
+        # 1. wait_for_selector
+        res = await executor.execute_action(
+            mock_session,
+            BrowserAction(
+                action_type=BrowserActionType.WAIT,
+                session_id="s_wait",
+                arguments={"operation": "wait_for_selector", "selector": "#my-elem", "timeout_seconds": 2.0},
+            ),
+        )
+        self.assertTrue(res.success)
+        mock_page.wait_for_selector.assert_awaited_once_with("#my-elem", timeout=2000, state="visible")
+
+        # 2. wait_for_load_state
+        res2 = await executor.execute_action(
+            mock_session,
+            BrowserAction(
+                action_type=BrowserActionType.WAIT,
+                session_id="s_wait",
+                arguments={"operation": "wait_for_load_state", "load_state": "networkidle", "timeout_seconds": 1.5},
+            ),
+        )
+        self.assertTrue(res2.success)
+        mock_page.wait_for_load_state.assert_awaited_once_with("networkidle", timeout=1500)
+
+        # 3. Invalid load state rejected
+        res3 = await executor.execute_action(
+            mock_session,
+            BrowserAction(
+                action_type=BrowserActionType.WAIT,
+                session_id="s_wait",
+                arguments={"operation": "wait_for_load_state", "load_state": "arbitrary_eval"},
+            ),
+        )
+        self.assertFalse(res3.success)
+        self.assertEqual(res3.status, "failed")
+
+    async def test_max_actions_limit_enforced(self):
+        from app.browser.config import BrowserConfig
+        cfg = BrowserConfig(max_browser_actions_per_task=2)
+        executor = BrowserExecutor(config=cfg)
+
+        mock_session = MagicMock()
+        mock_session.session_id = "s_limit"
+        mock_session.touch = MagicMock()
+        mock_tab = MagicMock()
+        mock_tab.page = MagicMock()
+        mock_session.get_active_tab.return_value = mock_tab
+
+        action = BrowserAction(
+            action_type=BrowserActionType.WAIT,
+            session_id="s_limit",
+            arguments={"operation": "duration", "seconds": 0.01},
+        )
+
+        # 1st action: OK
+        res1 = await executor.execute_action(mock_session, action)
+        self.assertTrue(res1.success)
+
+        # 2nd action: OK
+        res2 = await executor.execute_action(mock_session, action)
+        self.assertTrue(res2.success)
+
+        # 3rd action: exceeds limit -> BrowserSecurityError
+        with self.assertRaises(BrowserSecurityError):
+            await executor.execute_action(mock_session, action)
 
 
 if __name__ == "__main__":

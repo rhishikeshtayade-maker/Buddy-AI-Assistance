@@ -122,8 +122,10 @@ class TargetResolver:
                 f"'{target.page_fingerprint}' to '{current_fingerprint}'."
             )
 
-        # Check URL domain/origin consistency
-        if target.page_url.split("#")[0] != current_url.split("#")[0]:
+        # Check URL domain/origin consistency (ignoring trailing slash and case)
+        target_clean = target.page_url.split("#")[0].rstrip("/").lower()
+        current_clean = current_url.split("#")[0].rstrip("/").lower()
+        if target_clean != current_clean:
             raise StaleTargetError(
                 f"Target '{target.target_id}' belongs to URL '{target.page_url}', but active page is '{current_url}'."
             )

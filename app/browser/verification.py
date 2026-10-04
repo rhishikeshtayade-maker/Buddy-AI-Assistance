@@ -64,9 +64,8 @@ class BrowserVerifier:
         if element_state_changed:
             return True
 
-        # If click targeted an ordinary element and completed without error,
-        # but page did not change at all, still verify target was present and clicked
-        return element_state_changed or True
+        # Empirical verification fails if no mutation occurred
+        return False
 
     def verify_typing(
         self,
