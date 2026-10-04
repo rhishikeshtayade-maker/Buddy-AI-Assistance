@@ -56,8 +56,21 @@ class AgentService:
             event_bus=event_bus,
         )
 
+        from app.agent.reasoning.orchestrator import LongHorizonOrchestrator
+        self._long_horizon = LongHorizonOrchestrator(
+            registry=registry,
+            tool_executor=tool_executor,
+            ai_provider=ai_provider,
+            event_bus=event_bus,
+            memory_manager=memory_manager,
+        )
+
         self._tasks: Dict[str, Task] = {}
         self._contexts: Dict[str, TaskContext] = {}
+
+    @property
+    def long_horizon_orchestrator(self) -> Any:
+        return self._long_horizon
 
     @property
     def memory_manager(self) -> Optional[Any]:
@@ -211,3 +224,35 @@ class AgentService:
                 self._state_machine.transition_to(BuddyState.IDLE, reason="Waiting for user input/confirmation")
 
         return result
+
+    async def submit_long_horizon_goal(
+        self,
+        objective: str,
+        conversation_id: Optional[str] = None,
+        autonomy_level: Optional[Any] = None,
+        detected_candidates: Optional[List[str]] = None,
+    ) -> Any:
+        """Submit a long-horizon Goal through the reasoning engine."""
+        return await self._long_horizon.submit_goal(
+            objective=objective,
+            conversation_id=conversation_id,
+            autonomy_level=autonomy_level,
+            detected_candidates=detected_candidates,
+        )
+
+    async def execute_long_horizon_goal(
+        self,
+        goal_id: str,
+        confirmation_token: Optional[str] = None,
+        auth_credential: Optional[str] = None,
+    ) -> Any:
+        """Execute all planned steps of a long-horizon goal with empirical verification."""
+        return await self._long_horizon.execute_goal(
+            goal_id=goal_id,
+            confirmation_token=confirmation_token,
+            auth_credential=auth_credential,
+        )
+
+    def cancel_long_horizon_goal(self, goal_id: str, reason: str = "User cancelled goal") -> bool:
+        """Cancel a long-horizon goal idempotently."""
+        return self._long_horizon.cancel_goal(goal_id=goal_id, reason=reason)

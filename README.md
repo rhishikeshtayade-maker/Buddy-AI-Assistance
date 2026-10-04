@@ -35,8 +35,8 @@ BUDDY is developed using strict **Loop Engineering**:
 - [x] **LOOP 8**: Long-Term Memory + Contextual Personalization (Bounded categories: Session, Semantic, Episodic, Profile; conservative secret rejection; prompt injection defense; SQLite backend; Fernet encryption; conflict resolution)
 - [x] **LOOP 9**: Advanced Browser Automation + Web Interaction (Playwright integration, isolated clean context, SSRF/URL policy, DOM/accessibility inspection, confidence-scored element identification, prompt injection defense, credential/payment field protection, downloads/uploads security with PathPolicy, bounded wait & upload tools, key allowlist, cancellation support, empirical state verification)
 - [x] **LOOP 10**: Contextual Awareness + Proactive Assistance (Coarse activity states, foreground app/window title detection, untrusted notification & calendar providers, contextual scheduler, deterministic relevance scoring, quiet hours & interruption budgets, deduplication, sensitive context suppression, prompt injection defenses, zero-surveillance design: BUDDY does not continuously monitor the user)
-- [ ] **LOOP 11**: Encrypted Storage (AES-256-GCM Vault)
-- [ ] **LOOP 12**: Credential Management (OS Keyring integration)
+- [x] **LOOP 11**: Secure Secret Management & Native Windows DPAPI Vault (Windows Credential Manager, DPAPI fallback, AES-256-GCM memory encryption migration, centralized redaction, secret lifecycle rotation/deletion, zero secret exposure across AI/tools/memory/checkpoints)
+- [x] **LOOP 12**: Advanced Reasoning & Long-Horizon Agent Orchestration (Strongly typed goal model, deterministic requirement extraction, ambiguity detection & blocking clarification, DAG planner with cycle prevention, plan quality evaluation, explainable confidence model, milestone & checkpoint tracking, intermediate outcome evaluation, failure diagnosis, bounded safe replanning, task budgets, safe parallel execution, bounded specialist roles)
 - [ ] **LOOP 13**: Security & Permission Engine (Risk Levels 0-4)
 - [ ] **LOOP 14**: User Confirmation Workflows
 - [ ] **LOOP 15**: Authentication (PIN / Local verification)

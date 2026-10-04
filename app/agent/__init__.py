@@ -47,6 +47,21 @@ from app.agent.validator import (
     TaskPlanValidator,
 )
 
+from app.agent.reasoning import (
+    AutonomyLevel,
+    Checkpoint,
+    ClarificationRequest,
+    ConfidenceAssessment,
+    ConfidenceLevel,
+    Goal,
+    GoalPriority,
+    GoalStatus,
+    LongHorizonOrchestrator,
+    Milestone,
+    SubGoal,
+    TaskBudget,
+)
+
 __all__ = [
     # Models & Statuses
     "Task",
@@ -56,12 +71,25 @@ __all__ = [
     "TaskResult",
     "RetryPolicy",
     "FailureCategory",
+    # Loop 12 Long-Horizon Reasoning Models
+    "Goal",
+    "GoalStatus",
+    "GoalPriority",
+    "AutonomyLevel",
+    "ConfidenceLevel",
+    "ConfidenceAssessment",
+    "SubGoal",
+    "Milestone",
+    "Checkpoint",
+    "TaskBudget",
+    "ClarificationRequest",
     # Core Components
     "TaskPlanner",
     "TaskPlanValidator",
     "TaskExecutor",
     "TaskContext",
     "AgentService",
+    "LongHorizonOrchestrator",
     # Exceptions
     "PlanValidationError",
     "PlanSecurityViolationError",

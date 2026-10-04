@@ -210,9 +210,10 @@ class FileCreateTool(Tool):
             raise FileExistsError(f"File already exists and overwrite is False: '{valid_path}'")
 
         valid_path.parent.mkdir(parents=True, exist_ok=True)
-        valid_path.write_text(content, encoding="utf-8")
+        data = content.encode("utf-8")
+        valid_path.write_bytes(data)
 
-        digest = hashlib.sha256(content.encode("utf-8")).hexdigest()
+        digest = hashlib.sha256(data).hexdigest()
         size = valid_path.stat().st_size
 
         return {

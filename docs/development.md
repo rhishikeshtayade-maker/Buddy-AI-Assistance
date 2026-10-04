@@ -197,3 +197,25 @@ pytest tests/e2e/test_context_e2e.py -v
 pytest tests/integration/test_context_integration.py -v
 ```
 
+---
+
+## Loop 12: Advanced Reasoning & Long-Horizon Orchestration
+
+### Testing Commands
+```bash
+# Run Reasoning smoke test
+python -m app.agent.reasoning.smoke_test
+
+# Run Loop 12 unit tests
+pytest tests/unit/test_reasoning_models.py tests/unit/test_goal_extraction.py tests/unit/test_confidence.py tests/unit/test_milestones.py tests/unit/test_plan_evaluator.py tests/unit/test_diagnostics.py tests/unit/test_replanning.py tests/unit/test_task_budget.py tests/unit/test_parallel_execution.py tests/unit/test_specialists.py -v
+
+# Run Loop 12 security tests
+pytest tests/security/test_reasoning_security.py tests/security/test_autonomy_security.py tests/security/test_secret_isolation_reasoning.py tests/security/test_replanning_security.py tests/security/test_external_content_injection.py -v
+
+# Run Loop 12 integration tests
+pytest tests/integration/test_long_horizon_agent.py tests/integration/test_reasoning_memory.py tests/integration/test_reasoning_context.py tests/integration/test_reasoning_tool_executor.py -v
+
+# Run Loop 12 E2E scenario tests
+pytest tests/e2e/test_long_horizon_tasks.py tests/e2e/test_failure_recovery.py tests/e2e/test_ambiguous_goal.py tests/e2e/test_budget_exhaustion.py tests/e2e/test_security_block_during_long_task.py -v
+```
+

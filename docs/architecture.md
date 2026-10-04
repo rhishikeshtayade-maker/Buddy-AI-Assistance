@@ -661,3 +661,46 @@ EXECUTION → VERIFICATION → AUDIT TRAIL
 9. **Deduplication Manager** (`deduplication.py`): Computes SHA-256 fingerprints across trigger types, payload keys, and time buckets to prevent notification spam.
 10. **Proactive Action Dispatcher** (`proactive.py`): Exclusively routes action proposals to `ToolExecutor`. Destructive or dangerous actions (file deletion, app termination, shell execution) strictly require confirmation or authentication and are NEVER auto-executed.
 
+---
+
+## 13. Advanced Reasoning & Long-Horizon Agent Orchestration (Loop 12)
+
+### Architecture Pipeline:
+```text
+USER OBJECTIVE
+     ↓
+GOAL & REQUIREMENT EXTRACTOR (Deterministic functional requirements, constraints, assumptions)
+     ↓
+AMBIGUITY DETECTOR (Target ambiguity, destructive actions, missing parameters)
+     ├── Blocking Clarification Request (Pauses execution for user response)
+     ↓
+LONG-HORIZON PLANNER (Directed Acyclic Graph with cycle prevention & dependencies)
+     ↓
+PLAN QUALITY & SAFETY EVALUATOR (Tool existence, risk tier consistency, verification coverage)
+     ↓
+EXPLAINABLE CONFIDENCE EVALUATOR (Deterministic scoring with explainable reason codes)
+     ↓
+LONG-HORIZON ORCHESTRATOR
+     ├── TASK BUDGET CONTROLLER (Step limits, duration bounds, tool count, replan limits)
+     ├── MILESTONE & CHECKPOINT MANAGER (Progress tracking; zero secret persistence)
+     ├── PARALLEL EXECUTION COORDINATOR (Safe read-only concurrent steps; serialization for writes)
+     └── SPECIALIST ROLES (Researcher, Coder, Browser, Computer, Verifier with bounded capabilities)
+     ↓
+TOOL EXECUTOR (All steps routed through Loop 4 permission, confirmation & verification engines)
+     ↓
+INTERMEDIATE OUTCOME EVALUATOR (Empirical result verification)
+     ├── SUCCESS → Update Milestones & Record Checkpoint
+     ├── USER_REQUIRED → Pause for User Confirmation / Auth
+     ├── SECURITY_BLOCK → Fail Closed / Blocked
+     └── RECOVERABLE_FAILURE → Failure Diagnostician → Safe Replanner (Bounded adaptation)
+```
+
+### Core Tenets of Loop 12 Orchestration:
+1. **Strongly Typed Goal Model**: Goals, subgoals, milestones, checkpoints, and budgets are strongly validated Pydantic models.
+2. **Ambiguity Before Execution**: Ambiguous, destructive, or missing targets prompt structured clarification requests rather than guessing.
+3. **DAG-Based Planning**: Multi-step workflows model explicit dependencies without cycles; every state-modifying action requires empirical verification coverage.
+4. **Explainable Confidence**: Confidence scores (0.0 - 1.0) and levels (`VERY_LOW` to `VERY_HIGH`) are accompanied by explicit reason codes.
+5. **No Secret Persistence**: Checkpoints and milestone logs explicitly exclude credentials, confirmation tokens, or sensitive values.
+6. **Task Budgets**: Hard deterministic bounds enforce maximum steps, duration, tool counts, and replans to prevent runaway execution.
+7. **Specialist Roles with Bounded Capabilities**: Roles (`ResearcherRole`, `CoderRole`, `BrowserRole`, `ComputerRole`, `VerifierRole`) enforce principle of least privilege.
+

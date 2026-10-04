@@ -292,3 +292,24 @@ Environmental metadata (focused window, activity state, calendar events, notific
    - *Threat*: Sensitive context metadata persists across sessions.
    - *Countermeasure*: Snapshots are ephemeral in-memory records with strict TTL pruning. Snapshots detected as sensitive are never saved into history.
 
+---
+
+## 15. Advanced Reasoning & Long-Horizon Orchestration Security (Loop 12)
+
+### Fundamental Tenets:
+1. **Autonomy Gating & Privilege Escalation Prevention**:
+   - Autonomy levels (`MANUAL`, `ASSISTED`, `SUPERVISED`, `LIMITED_AUTONOMOUS`) enforce hard barriers.
+   - A plan or step can **NEVER** downgrade a tool's defined risk level (e.g. from `DANGEROUS` to `SAFE`).
+   - Replanning cannot swap a blocked dangerous action for another unverified destructive action.
+2. **Ambiguity Defense & Clarification Demands**:
+   - When user objectives refer to ambiguous targets (e.g. multiple matching files, unspecified deletion targets), the reasoning engine strictly requires user clarification before generating or executing destructive plans.
+3. **No Secret Persistence in Checkpoints**:
+   - Reasoning checkpoints and milestone state persist only structural progression (`milestone_id`, `completed_step_ids`, `verification_hashes`).
+   - Passwords, API keys, bearer tokens, and confirmation tokens are strictly stripped and never saved to persistent checkpoints or memory logs.
+4. **Hard Task Budgets**:
+   - Deterministic resource caps prevent runaway reasoning loops: maximum steps, total execution duration, maximum tool invocations, and bounded replan attempts.
+   - When budgets are reached, execution fails closed into `BUDGET_EXCEEDED`.
+5. **Specialist Role Boundaries**:
+   - Roles (`ResearcherRole`, `CoderRole`, `BrowserRole`, `ComputerRole`, `VerifierRole`) restrict tool invocations strictly to their approved allowlists.
+   - Cross-domain tool usage (e.g. `ResearcherRole` attempting `mouse.click` or `file.delete`) is hard-rejected.
+

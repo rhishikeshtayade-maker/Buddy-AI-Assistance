@@ -240,3 +240,19 @@ All browser actions enforce strict, fail-closed thresholds:
 - **Redirect Security**: Redirect chains are re-validated at every hop. Navigations redirecting from approved public domains into internal or cloud metadata IPs (e.g. `169.254.169.254`) are immediately rejected.
 - **Memory Isolation**: External web content is strictly quarantined inside `<external_web_content>` tags as untrusted data. It never creates authorization memories in Loop 8 memory or alters security privileges.
 
+---
+
+## 5. Specialist Roles & Capability Boundaries (Loop 12)
+
+Loop 12 introduces bounded specialist roles to coordinate long-horizon tasks under strict capability isolation:
+
+| Specialist Role | Permitted Tools / Capabilities | Prohibited Capabilities |
+|---|---|---|
+| `ResearcherRole` | `browser.open`, `browser.navigate`, `browser.extract_text`, `browser.inspect`, `file.read`, `file.search` | File writes, deletions, OS interaction, script execution |
+| `CoderRole` | `file.read`, `file.create`, `file.search` | Destructive file deletion, raw shell execution, credential extraction |
+| `BrowserRole` | All `browser.*` tools | Native mouse/keyboard, direct filesystem bypass |
+| `ComputerRole` | `mouse.*`, `keyboard.*` | Arbitrary execution, credential typing |
+| `VerifierRole` | `file.read`, `file.search`, `browser.inspect` (read-only verification) | Any state modification or writes |
+
+Specialists cannot escalate privileges or execute tools outside their defined boundaries.
+
