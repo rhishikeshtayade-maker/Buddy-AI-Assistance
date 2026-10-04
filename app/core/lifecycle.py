@@ -10,6 +10,7 @@ import asyncio
 import logging
 import signal
 import sys
+from pathlib import Path
 from typing import Optional
 
 from app import __version__
@@ -258,6 +259,25 @@ class LifecycleManager:
                 except Exception as c_err:
                     self._logger.warning("Could not register context awareness subsystem: %s", c_err)
 
+            # 7. Initialize Secret Vault Subsystem if enabled (Loop 11)
+            if getattr(self._config, "secrets_vault_enabled", True):
+                try:
+                    from app.security.secrets.health import create_secret_vault_health_check
+                    from app.security.secrets.service import SecretVaultService
+                    from app.security.secrets.windows_dpapi import WindowsDPAPIProvider
+
+                    v_dir = getattr(self._config, "secrets_vault_dir", Path("data/vault/dpapi"))
+                    dpapi_p = WindowsDPAPIProvider(vault_dir=v_dir)
+                    vault_service = SecretVaultService(provider=dpapi_p)
+                    self._service_registry.register(SecretVaultService, vault_service)
+                    self._service_registry.register("secret_vault", vault_service)
+                    self._health_manager.register_check(
+                        "secret_vault", create_secret_vault_health_check(vault_service)
+                    )
+                    self._logger.info("Secret vault subsystem registered with health check.")
+                except Exception as s_err:
+                    self._logger.warning("Could not register secret vault subsystem: %s", s_err)
+
             self._is_initialized = True
             self._logger.info("BUDDY Core Runtime services registered successfully.")
             return self._context
@@ -380,6 +400,14 @@ class LifecycleManager:
                     await ctx_svc.stop()
             except Exception as e:
                 self._logger.warning("Error stopping context awareness service: %s", e)
+
+            # Shutdown secret vault if registered
+            try:
+                vault_svc = self._service_registry.get("secret_vault")
+                if vault_svc:
+                    vault_svc.shutdown()
+            except Exception as e:
+                self._logger.warning("Error shutting down secret vault: %s", e)
 
             # Cleanup event bus
             try:

@@ -38,9 +38,11 @@ env/
 *.key
 *.cert
 *.pfx
-secrets/
-credentials/
+/secrets/
+!app/security/secrets/
+/credentials/
 master.key
+*.dpapi
 
 # SQLite database & data storage
 *.sqlite

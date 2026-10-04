@@ -44,6 +44,9 @@ class WebContentSanitizer:
         cleaned = re.sub(r"[ \t]+", " ", text)
         cleaned = re.sub(r"\n{3,}", "\n\n", cleaned).strip()
 
+        from app.security.secrets.redaction import redact_string
+        cleaned = redact_string(cleaned)
+
         if len(cleaned) > limit:
             cleaned = cleaned[:limit] + f"\n... [Truncated: exceeded {limit} characters]"
 

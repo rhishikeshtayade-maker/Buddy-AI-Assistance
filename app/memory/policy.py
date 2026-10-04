@@ -100,6 +100,17 @@ class MemoryPolicy:
         for name, pattern in SECRET_PATTERNS:
             if pattern.search(text):
                 detected.append(name)
+
+        # Cross-check with centralized secret redaction patterns
+        try:
+            from app.security.secrets.redaction import SECRET_PATTERNS as REDACTION_PATTERNS
+            for pat in REDACTION_PATTERNS:
+                if pat.search(text) and "centralized_secret" not in detected:
+                    detected.append("centralized_secret")
+                    break
+        except Exception:
+            pass
+
         return detected
 
     def detect_security_injections(self, text: str) -> List[str]:

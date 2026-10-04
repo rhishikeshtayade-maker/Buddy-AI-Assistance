@@ -148,6 +148,17 @@ class PrivacyGuard:
         if snapshot.browser_context:
             snapshot.browser_context.trust = TrustClassification.UNTRUSTED
 
+        # Scrub credentials and tokens from all snapshot strings
+        from app.security.secrets.redaction import redact_string
+        if snapshot.window_title:
+            snapshot.window_title = redact_string(snapshot.window_title)
+        if snapshot.foreground_app and snapshot.foreground_app.window_title:
+            snapshot.foreground_app.window_title = redact_string(snapshot.foreground_app.window_title)
+        if snapshot.notification_metadata and snapshot.notification_metadata.preview:
+            snapshot.notification_metadata.preview = redact_string(snapshot.notification_metadata.preview)
+        if snapshot.browser_context and snapshot.browser_context.active_tab_title:
+            snapshot.browser_context.active_tab_title = redact_string(snapshot.browser_context.active_tab_title)
+
         # Record into ephemeral history if history storage is enabled and NOT sensitive
         if self._config.context_history_enabled and not is_sensitive:
             self._prune_history()

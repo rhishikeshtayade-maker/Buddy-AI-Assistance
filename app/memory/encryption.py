@@ -83,34 +83,86 @@ def derive_key_from_passphrase(passphrase: str, salt: bytes = b"buddy_memory_sal
     return base64.urlsafe_b64encode(derived)
 
 
-def get_memory_encryptor(config: BuddyConfig) -> MemoryEncryptor:
+def get_memory_encryptor(
+    config: BuddyConfig,
+    vault_service: Optional[Any] = None,
+) -> MemoryEncryptor:
     """Factory to construct the appropriate MemoryEncryptor based on application configuration.
 
     If memory_encryption_enabled is True:
-    - Looks for an explicit key in config.memory_encryption_key
-    - Or checks BUDDY_MEMORY_KEY env variable
-    - Or checks data/.memory_key file
-    - If no key is found, FAILS CLOSED by raising MemoryEncryptionError.
+    1. Checks native secure vault storage for BUDDY_MEMORY_ENCRYPTION_KEY.
+    2. If not found, checks for legacy key (config.memory_encryption_key, BUDDY_MEMORY_KEY env, or data/.memory_key).
+       If a legacy key is found, validates it and migrates it into the secure native vault.
+    3. If no key is found or migration fails, FAILS CLOSED by raising MemoryEncryptionError.
     """
     if not config.memory_encryption_enabled:
         return NoOpMemoryEncryptor()
 
-    key_str = config.memory_encryption_key or os.environ.get("BUDDY_MEMORY_KEY")
+    key_str: Optional[str] = None
 
-    if not key_str:
-        # Check local protected key file
-        key_file = Path("data/.memory_key")
-        if key_file.exists():
+    # 1. Explicit in-memory / config key override takes immediate precedence
+    if config.memory_encryption_key:
+        key_str = config.memory_encryption_key
+
+    # 2. Check native secure vault if no explicit key was passed
+    if not key_str and getattr(config, "secrets_vault_enabled", True):
+        svc = vault_service
+        if svc is None:
             try:
-                key_str = key_file.read_text(encoding="utf-8").strip()
+                from app.security.secrets.service import SecretVaultService
+                from app.security.secrets.windows_dpapi import WindowsDPAPIProvider
+
+                v_dir = getattr(config, "secrets_vault_dir", Path("data/vault/dpapi"))
+                dpapi_p = WindowsDPAPIProvider(vault_dir=v_dir)
+                svc = SecretVaultService(provider=dpapi_p)
             except Exception as e:
-                raise MemoryEncryptionError(f"Failed to read memory key file '{key_file}': {e}") from e
+                logger.debug("Could not initialize SecretVaultService for memory encryption: %s", e)
+                svc = None
+
+        if svc is not None:
+            try:
+                if svc.exists("BUDDY_MEMORY_ENCRYPTION_KEY"):
+                    key_str = svc.retrieve_secret_value(
+                        "BUDDY_MEMORY_ENCRYPTION_KEY",
+                        purpose="memory_encryption_initialization",
+                    )
+            except Exception as e:
+                logger.warning("Failed to query native vault for memory encryption key: %s", e)
+
+        # 3. If native key not found, check legacy sources and migrate
+        if not key_str:
+            legacy_source_val = os.environ.get("BUDDY_MEMORY_KEY")
+            key_file = Path("data/.memory_key")
+            if not legacy_source_val and key_file.exists():
+                try:
+                    legacy_source_val = key_file.read_text(encoding="utf-8").strip()
+                except Exception as e:
+                    raise MemoryEncryptionError(f"Failed to read memory key file '{key_file}': {e}") from e
+
+            if legacy_source_val:
+                key_str = legacy_source_val
+                # If vault is available, migrate it to native storage
+                if svc is not None:
+                    try:
+                        svc.store_secret(
+                            identifier="BUDDY_MEMORY_ENCRYPTION_KEY",
+                            secret_value=key_str,
+                            metadata={"description": "Migrated legacy memory key"},
+                        )
+                        logger.info("Migrated legacy memory encryption key into native vault.")
+                        if key_file.exists():
+                            try:
+                                key_file.unlink()
+                            except Exception:
+                                pass
+                    except Exception as e:
+                        logger.warning("Could not persist migrated memory key to vault: %s", e)
 
     if not key_str:
         # FAIL CLOSED: Never pretend to be encrypted if no key exists
         err_msg = (
-            "Memory encryption is enabled, but no encryption key was provided. "
-            "Set BUDDY_MEMORY_KEY or supply memory_encryption_key in config. Failing closed."
+            "Memory encryption is enabled, but no encryption key was provided in native vault or legacy sources. "
+            "Failing closed."
         )
         logger.critical(err_msg)
         raise MemoryEncryptionError(err_msg)

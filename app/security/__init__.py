@@ -16,6 +16,8 @@ from app.security.interaction_policy import (
 from app.security.path_policy import PathPolicy
 from app.security.permissions import PermissionDecision, PermissionEngine
 
+from app.security.secrets import SecretAccessType, SecretMetadata, SecretVaultService
+
 __all__ = [
     "AuditLogger",
     "AuditRecord",
@@ -31,4 +33,7 @@ __all__ = [
     "InteractionSecurityError",
     "ALLOWED_KEYS",
     "PROTECTED_APPLICATIONS",
+    "SecretVaultService",
+    "SecretAccessType",
+    "SecretMetadata",
 ]

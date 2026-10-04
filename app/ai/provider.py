@@ -24,6 +24,7 @@ from app.ai.exceptions import (
     AITimeoutError,
 )
 from app.ai.models import AIResponse, ChatMessage, MessageRole
+from app.security.secrets.redaction import redact_string
 
 logger = logging.getLogger("buddy.ai.provider")
 
@@ -328,8 +329,9 @@ class CloudAIProvider(AIProvider):
 
                 # Authentication error (do not retry)
                 if resp.status_code in (401, 403):
+                    cleaned_err = redact_string(resp.text)
                     raise AIAuthenticationError(
-                        f"Authentication failed (HTTP {resp.status_code}): {resp.text}",
+                        f"Authentication failed (HTTP {resp.status_code}): {cleaned_err}",
                         provider=self.provider_name,
                         status_code=resp.status_code,
                     )
@@ -351,8 +353,9 @@ class CloudAIProvider(AIProvider):
 
                 # Client error (400, etc. - do not retry)
                 if 400 <= resp.status_code < 500:
+                    cleaned_err = redact_string(resp.text)
                     raise AIModelError(
-                        f"Cloud AI client error (HTTP {resp.status_code}): {resp.text}",
+                        f"Cloud AI client error (HTTP {resp.status_code}): {cleaned_err}",
                         provider=self.provider_name,
                         status_code=resp.status_code,
                     )
@@ -473,6 +476,12 @@ class CloudAIProvider(AIProvider):
             if isinstance(e, AIError):
                 raise
             raise AIProviderError(f"Cloud AI streaming error: {e}", provider=self.provider_name) from e
+
+    def __repr__(self) -> str:
+        return f"<CloudAIProvider model='{self._model}' base_url='{self._base_url}'>"
+
+    def __str__(self) -> str:
+        return self.__repr__()
 
 
 class LocalAIProvider(AIProvider):

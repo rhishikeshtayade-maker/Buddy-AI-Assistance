@@ -28,6 +28,7 @@ from app.security.audit import AuditLogger, AuditRecord
 from app.security.authentication import Authenticator, MockAuthenticator
 from app.security.confirmation import ConfirmationManager
 from app.security.permissions import PermissionDecision, PermissionEngine
+from app.security.secrets.redaction import redact_structure
 from app.tools.events import (
     ToolConfirmationRequiredEvent,
     ToolDeniedEvent,
@@ -368,13 +369,14 @@ class ToolExecutor:
 
             await self._publish(ToolVerificationFailedEvent(request_id=req_id, tool_name=tool_name, error=err_msg))
 
+            safe_output = redact_structure(raw_output)
             return ToolResult(
                 request_id=req_id,
                 tool_name=tool_name,
                 success=False,
                 verified=False,
                 status=ToolExecutionStatus.VERIFICATION_FAILED,
-                output=raw_output,
+                output=safe_output,
                 error=err_msg,
                 execution_latency=latency,
             )
@@ -392,12 +394,13 @@ class ToolExecutor:
             )
         )
 
+        safe_output = redact_structure(raw_output)
         return ToolResult(
             request_id=req_id,
             tool_name=tool_name,
             success=True,
             verified=True,
             status=ToolExecutionStatus.SUCCEEDED,
-            output=raw_output,
+            output=safe_output,
             execution_latency=latency,
         )

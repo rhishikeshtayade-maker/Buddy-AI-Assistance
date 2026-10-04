@@ -401,6 +401,20 @@ class BuddyConfig(BaseSettings):
         validation_alias="SENSITIVE_CONTEXT_SUPPRESSION_ENABLED",
     )
 
+    # Native Secret Vault Settings (Loop 11)
+    secrets_vault_enabled: bool = Field(
+        default=True,
+        validation_alias="SECRETS_VAULT_ENABLED",
+    )
+    secrets_provider: str = Field(
+        default="auto",
+        validation_alias="SECRETS_PROVIDER",
+    )
+    secrets_vault_dir: Path = Field(
+        default=Path("data/vault/dpapi"),
+        validation_alias="SECRETS_VAULT_DIR",
+    )
+
     @classmethod
     def load_from_env(cls, env_file: Optional[str] = None) -> BuddyConfig:
         """Load configuration respecting BUDDY_ prefixed fallbacks and explicit env file."""
@@ -498,6 +512,9 @@ class BuddyConfig(BaseSettings):
             "BUDDY_CONTEXT_HISTORY_ENABLED": "CONTEXT_HISTORY_ENABLED",
             "BUDDY_CONTEXT_HISTORY_TTL": "CONTEXT_HISTORY_TTL",
             "BUDDY_SENSITIVE_CONTEXT_SUPPRESSION_ENABLED": "SENSITIVE_CONTEXT_SUPPRESSION_ENABLED",
+            "BUDDY_SECRETS_VAULT_ENABLED": "SECRETS_VAULT_ENABLED",
+            "BUDDY_SECRETS_PROVIDER": "SECRETS_PROVIDER",
+            "BUDDY_SECRETS_VAULT_DIR": "SECRETS_VAULT_DIR",
         }
 
         for buddy_var, core_var in alias_map.items():
