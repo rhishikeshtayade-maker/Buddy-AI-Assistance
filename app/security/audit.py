@@ -62,3 +62,26 @@ class AuditLogger:
                     f.write(json_line + "\n")
             except Exception as e:
                 logger.error("Failed to append to audit log file: %s", e)
+
+    def log_event(
+        self,
+        event_type: str,
+        user: str = "system",
+        resource: str = "",
+        action: str = "",
+        status: str = "SUCCESS",
+        details: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        """Write a structured security audit event."""
+        rec = AuditRecord(
+            timestamp=time.time(),
+            request_id=event_type,
+            tool_name=resource,
+            execution_status=status,
+            metadata={
+                "user": user,
+                "action": action,
+                **(details or {}),
+            },
+        )
+        self.record(rec)

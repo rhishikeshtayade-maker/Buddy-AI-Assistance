@@ -34,7 +34,7 @@ BUDDY is developed using strict **Loop Engineering**:
 - [x] **LOOP 7**: Advanced Agentic Task Planning + Multi-Step Execution (Restricted prompt planner, DAG dependency validator, bounded retries, adaptive re-planning, per-step confirmation/auth gating, anti-runaway boundaries)
 - [x] **LOOP 8**: Long-Term Memory + Contextual Personalization (Bounded categories: Session, Semantic, Episodic, Profile; conservative secret rejection; prompt injection defense; SQLite backend; Fernet encryption; conflict resolution)
 - [x] **LOOP 9**: Advanced Browser Automation + Web Interaction (Playwright integration, isolated clean context, SSRF/URL policy, DOM/accessibility inspection, confidence-scored element identification, prompt injection defense, credential/payment field protection, downloads/uploads security with PathPolicy, bounded wait & upload tools, key allowlist, cancellation support, empirical state verification)
-- [ ] **LOOP 10**: Memory System (Short-term & Long-term semantic store)
+- [x] **LOOP 10**: Contextual Awareness + Proactive Assistance (Coarse activity states, foreground app/window title detection, untrusted notification & calendar providers, contextual scheduler, deterministic relevance scoring, quiet hours & interruption budgets, deduplication, sensitive context suppression, prompt injection defenses, zero-surveillance design: BUDDY does not continuously monitor the user)
 - [ ] **LOOP 11**: Encrypted Storage (AES-256-GCM Vault)
 - [ ] **LOOP 12**: Credential Management (OS Keyring integration)
 - [ ] **LOOP 13**: Security & Permission Engine (Risk Levels 0-4)

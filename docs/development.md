@@ -176,3 +176,24 @@ pytest tests/security/test_browser_security.py -v
 pytest tests/e2e/test_browser_e2e.py -v
 ```
 
+---
+
+## 12. Contextual Awareness & Proactive Assistance Testing (Loop 10)
+
+```powershell
+# Run the 12-milestone Windows smoke test (foreground, activity, scheduler, suggestions, quiet hours, sensitive redaction, safe action, dangerous block, audit, shutdown)
+python -m app.context_awareness.smoke_test
+
+# Run context awareness unit tests (models, activity observer, foreground observer, scheduler, relevance scoring, quiet hours, cooldown, deduplication, suggestion generation)
+pytest tests/unit/test_context_awareness.py -v
+
+# Run comprehensive context security tests (observer disabled by policy, dynamic permission revocation, failure isolation, password managers, banking, UAC, prompt injections, dangerous action blocking, quiet hours)
+pytest tests/security/test_context_security.py -v
+
+# Run all 10 E2E scenarios (contextual reminder, quiet hours, coding context, dangerous context, malicious notification, proactive safe action, dangerous proposal block, observer failure, duplicate trigger, context injection)
+pytest tests/e2e/test_context_e2e.py -v
+
+# Run context subsystem integration tests (LifecycleManager registration, EventBus publishing, UI state model)
+pytest tests/integration/test_context_integration.py -v
+```
+

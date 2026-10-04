@@ -63,6 +63,8 @@ class ForegroundObserver(BaseObserver):
     @property
     def current_app(self) -> Optional[ForegroundAppInfo]:
         """Get the last detected foreground application info."""
+        if self._simulated_info is not None:
+            return self._query_foreground()
         return self._current_info
 
     def set_simulated_app(
@@ -81,6 +83,7 @@ class ForegroundObserver(BaseObserver):
             pid=pid,
             is_sensitive=is_sensitive,
         )
+        self._current_info = self._query_foreground()
 
     def clear_simulated_app(self) -> None:
         """Clear test simulation."""

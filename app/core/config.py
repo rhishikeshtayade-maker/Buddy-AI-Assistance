@@ -331,6 +331,76 @@ class BuddyConfig(BaseSettings):
         validation_alias="BROWSER_DOWNLOAD_DIR",
     )
 
+    # Contextual Awareness & Proactive Assistance Settings (Loop 10)
+    context_awareness_enabled: bool = Field(
+        default=True,
+        validation_alias="CONTEXT_AWARENESS_ENABLED",
+    )
+    foreground_observer_enabled: bool = Field(
+        default=True,
+        validation_alias="FOREGROUND_OBSERVER_ENABLED",
+    )
+    activity_observer_enabled: bool = Field(
+        default=True,
+        validation_alias="ACTIVITY_OBSERVER_ENABLED",
+    )
+    notification_observer_enabled: bool = Field(
+        default=True,
+        validation_alias="NOTIFICATION_OBSERVER_ENABLED",
+    )
+    calendar_enabled: bool = Field(
+        default=True,
+        validation_alias="CALENDAR_ENABLED",
+    )
+    browser_context_enabled: bool = Field(
+        default=True,
+        validation_alias="BROWSER_CONTEXT_ENABLED",
+    )
+    proactive_assistance_enabled: bool = Field(
+        default=True,
+        validation_alias="PROACTIVE_ASSISTANCE_ENABLED",
+    )
+    activity_idle_threshold: float = Field(
+        default=300.0,
+        validation_alias="ACTIVITY_IDLE_THRESHOLD",
+    )
+    activity_away_threshold: float = Field(
+        default=900.0,
+        validation_alias="ACTIVITY_AWAY_THRESHOLD",
+    )
+    quiet_hours_enabled: bool = Field(
+        default=False,
+        validation_alias="QUIET_HOURS_ENABLED",
+    )
+    quiet_hours_start: str = Field(
+        default="22:00",
+        validation_alias="QUIET_HOURS_START",
+    )
+    quiet_hours_end: str = Field(
+        default="07:00",
+        validation_alias="QUIET_HOURS_END",
+    )
+    suggestion_cooldown_seconds: float = Field(
+        default=600.0,
+        validation_alias="SUGGESTION_COOLDOWN_SECONDS",
+    )
+    max_interruptions_per_hour: int = Field(
+        default=6,
+        validation_alias="MAX_INTERRUPTIONS_PER_HOUR",
+    )
+    context_history_enabled: bool = Field(
+        default=False,
+        validation_alias="CONTEXT_HISTORY_ENABLED",
+    )
+    context_history_ttl: float = Field(
+        default=3600.0,
+        validation_alias="CONTEXT_HISTORY_TTL",
+    )
+    sensitive_context_suppression_enabled: bool = Field(
+        default=True,
+        validation_alias="SENSITIVE_CONTEXT_SUPPRESSION_ENABLED",
+    )
+
     @classmethod
     def load_from_env(cls, env_file: Optional[str] = None) -> BuddyConfig:
         """Load configuration respecting BUDDY_ prefixed fallbacks and explicit env file."""
@@ -411,6 +481,23 @@ class BuddyConfig(BaseSettings):
             "BUDDY_MAX_BROWSER_DOWNLOAD_SIZE_MB": "MAX_BROWSER_DOWNLOAD_SIZE_MB",
             "BUDDY_MAX_BROWSER_UPLOAD_SIZE_MB": "MAX_BROWSER_UPLOAD_SIZE_MB",
             "BUDDY_MAX_PAGE_TEXT_CHARS": "MAX_PAGE_TEXT_CHARS",
+            "BUDDY_CONTEXT_AWARENESS_ENABLED": "CONTEXT_AWARENESS_ENABLED",
+            "BUDDY_FOREGROUND_OBSERVER_ENABLED": "FOREGROUND_OBSERVER_ENABLED",
+            "BUDDY_ACTIVITY_OBSERVER_ENABLED": "ACTIVITY_OBSERVER_ENABLED",
+            "BUDDY_NOTIFICATION_OBSERVER_ENABLED": "NOTIFICATION_OBSERVER_ENABLED",
+            "BUDDY_CALENDAR_ENABLED": "CALENDAR_ENABLED",
+            "BUDDY_BROWSER_CONTEXT_ENABLED": "BROWSER_CONTEXT_ENABLED",
+            "BUDDY_PROACTIVE_ASSISTANCE_ENABLED": "PROACTIVE_ASSISTANCE_ENABLED",
+            "BUDDY_ACTIVITY_IDLE_THRESHOLD": "ACTIVITY_IDLE_THRESHOLD",
+            "BUDDY_ACTIVITY_AWAY_THRESHOLD": "ACTIVITY_AWAY_THRESHOLD",
+            "BUDDY_QUIET_HOURS_ENABLED": "QUIET_HOURS_ENABLED",
+            "BUDDY_QUIET_HOURS_START": "QUIET_HOURS_START",
+            "BUDDY_QUIET_HOURS_END": "QUIET_HOURS_END",
+            "BUDDY_SUGGESTION_COOLDOWN_SECONDS": "SUGGESTION_COOLDOWN_SECONDS",
+            "BUDDY_MAX_INTERRUPTIONS_PER_HOUR": "MAX_INTERRUPTIONS_PER_HOUR",
+            "BUDDY_CONTEXT_HISTORY_ENABLED": "CONTEXT_HISTORY_ENABLED",
+            "BUDDY_CONTEXT_HISTORY_TTL": "CONTEXT_HISTORY_TTL",
+            "BUDDY_SENSITIVE_CONTEXT_SUPPRESSION_ENABLED": "SENSITIVE_CONTEXT_SUPPRESSION_ENABLED",
         }
 
         for buddy_var, core_var in alias_map.items():

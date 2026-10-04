@@ -218,6 +218,46 @@ class LifecycleManager:
                 except Exception as t_err:
                     self._logger.warning("Could not register tool subsystem: %s", t_err)
 
+            # 6. Initialize Context Awareness Subsystem if enabled (Loop 10)
+            if getattr(self._config, "context_awareness_enabled", True):
+                try:
+                    from app.context_awareness.config import ContextAwarenessConfig
+                    from app.context_awareness.service import ContextAwarenessService
+
+                    ctx_cfg = ContextAwarenessConfig(
+                        context_awareness_enabled=getattr(self._config, "context_awareness_enabled", True),
+                        foreground_observer_enabled=getattr(self._config, "foreground_observer_enabled", True),
+                        activity_observer_enabled=getattr(self._config, "activity_observer_enabled", True),
+                        notification_observer_enabled=getattr(self._config, "notification_observer_enabled", True),
+                        calendar_enabled=getattr(self._config, "calendar_enabled", True),
+                        browser_context_enabled=getattr(self._config, "browser_context_enabled", True),
+                        proactive_assistance_enabled=getattr(self._config, "proactive_assistance_enabled", True),
+                        activity_idle_threshold=getattr(self._config, "activity_idle_threshold", 300.0),
+                        activity_away_threshold=getattr(self._config, "activity_away_threshold", 900.0),
+                        quiet_hours_enabled=getattr(self._config, "quiet_hours_enabled", False),
+                        quiet_hours_start=getattr(self._config, "quiet_hours_start", "22:00"),
+                        quiet_hours_end=getattr(self._config, "quiet_hours_end", "07:00"),
+                        suggestion_cooldown_seconds=getattr(self._config, "suggestion_cooldown_seconds", 600.0),
+                        max_interruptions_per_hour=getattr(self._config, "max_interruptions_per_hour", 6),
+                        context_history_enabled=getattr(self._config, "context_history_enabled", False),
+                        context_history_ttl=getattr(self._config, "context_history_ttl", 3600.0),
+                        sensitive_context_suppression_enabled=getattr(self._config, "sensitive_context_suppression_enabled", True),
+                    )
+
+                    tool_exec = self._service_registry.get("tool_executor")
+                    ctx_service = ContextAwarenessService(
+                        config=ctx_cfg,
+                        event_bus=self._event_bus,
+                        health_manager=self._health_manager,
+                        audit_logger=None,
+                        tool_executor=tool_exec,
+                    )
+                    self._service_registry.register(ContextAwarenessService, ctx_service)
+                    self._service_registry.register("context_awareness", ctx_service)
+                    self._logger.info("Context awareness subsystem registered.")
+                except Exception as c_err:
+                    self._logger.warning("Could not register context awareness subsystem: %s", c_err)
+
             self._is_initialized = True
             self._logger.info("BUDDY Core Runtime services registered successfully.")
             return self._context
@@ -332,6 +372,14 @@ class LifecycleManager:
                 await self._event_bus.publish(ApplicationStoppingEvent(reason=reason))
             except Exception as e:
                 self._logger.warning("Error publishing ApplicationStoppingEvent: %s", e)
+
+            # Stop context awareness if registered
+            try:
+                ctx_svc = self._service_registry.get("context_awareness")
+                if ctx_svc:
+                    await ctx_svc.stop()
+            except Exception as e:
+                self._logger.warning("Error stopping context awareness service: %s", e)
 
             # Cleanup event bus
             try:

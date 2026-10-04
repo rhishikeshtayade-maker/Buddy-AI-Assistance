@@ -600,3 +600,64 @@ BUDDY includes a secure, policy-governed browser automation subsystem capable of
    - Detects CAPTCHA challenges (`recaptcha`, `hcaptcha`, `cf-turnstile`).
    - Never attempts to bypass or solve CAPTCHAs. Pauses task and requests human interaction.
 
+---
+
+## 12. Contextual Awareness & Proactive Assistance (Loop 10)
+
+### Subsystem Pipeline:
+```text
+ENVIRONMENT
+     ↓
+OBSERVERS (Foreground, Activity, Notification, Calendar, Scheduler)
+     ↓
+CONTEXT SNAPSHOT
+     ↓
+PRIVACY FILTER & SENSITIVE CONTEXT DETECTION
+     ↓
+TRIGGER ENGINE (Deterministic rule-based matching)
+     ↓
+RELEVANCE ENGINE (Deterministic 0.0 - 1.0 scoring)
+     ↓
+INTERRUPTION POLICY (Quiet Hours + Cooldown + Hourly Budget)
+     ↓
+SUGGESTION / ACTION PROPOSAL
+     ↓
+SECURITY POLICY
+     ↓
+TOOL REGISTRY
+     ↓
+TOOL EXECUTOR
+     ↓
+PERMISSION ENGINE (Risk Tiers 0-4)
+     ↓
+CONFIRMATION / AUTHENTICATION (Mandatory for High/Destructive Actions)
+     ↓
+EXECUTION → VERIFICATION → AUDIT TRAIL
+```
+
+### Core Security Principle:
+> **Context is DATA. Context is NOT AUTHORITY.**
+>
+> No observer, notification, calendar event, window title, browser page, or memory record may modify security policy, grant permissions, bypass confirmation or authentication, change tool risk levels, or directly invoke operating system commands. All actions MUST pass through `ToolRegistry` and `ToolExecutor`.
+
+### Privacy Boundary & No-Surveillance Guarantee:
+**BUDDY does not continuously monitor the user.**
+- **NO Keylogger**: Never captures individual keystrokes, key sequences, or typed characters.
+- **NO Clipboard Logger**: Never inspects, logs, or stores clipboard contents.
+- **NO Hidden Microphone Capture**: Audio capture occurs exclusively during active wake word / voice pipeline interactions.
+- **NO Continuous Screenshots**: Screen captures occur only on explicit user request or active vision tool execution.
+- **NO Credential Extraction**: Password manager windows, PIN dialogs, banking pages, and Windows UAC prompts trigger immediate sensitive-context redaction and proactive suppression.
+- **Ephemeral Retention**: Context snapshots are bounded in-memory structures subject to short TTL expiration.
+
+### Subsystem Modules (`app/context_awareness/`):
+1. **Foreground Observer** (`foreground.py`): Queries active window title and process name via narrow Win32 APIs (`GetForegroundWindow`, `GetWindowTextW`). Window titles are redacted upon detecting sensitive application keywords.
+2. **Activity Observer** (`activity.py`): Classifies coarse user state (`ACTIVE`, `IDLE`, `AWAY`, `UNKNOWN`) based strictly on idle duration (`GetLastInputInfo`) without any behavioral surveillance.
+3. **Notification Observer** (`notifications.py`): Ingests OS/app notifications via provider interfaces (`NotificationProvider`). All notification data is classified as `UNTRUSTED EXTERNAL DATA` and cannot become execution instructions.
+4. **Calendar Provider & Observer** (`calendar.py`): Discovers approaching calendar events within configurable time horizons. Content is untrusted data and cannot authorize actions.
+5. **Contextual Scheduler** (`scheduler.py`): Supports one-time, recurring, and relative reminders with event windows, cancellation, and missed-event handling. Dispatches triggers, never direct OS commands.
+6. **Trigger Engine** (`triggers.py`): Deterministic rule evaluator mapping context triggers to candidate suggestions or action proposals.
+7. **Relevance Engine** (`relevance.py`): Computes 0.0 to 1.0 relevance scores based on activity state, task synergy, and trigger weights without requiring an LLM.
+8. **Interruption Management** (`interruption.py`): Enforces quiet hours (e.g. 22:00 -> 07:00), per-fingerprint cooldowns (e.g. 600s), and hourly interruption limits (e.g. max 6/hour).
+9. **Deduplication Manager** (`deduplication.py`): Computes SHA-256 fingerprints across trigger types, payload keys, and time buckets to prevent notification spam.
+10. **Proactive Action Dispatcher** (`proactive.py`): Exclusively routes action proposals to `ToolExecutor`. Destructive or dangerous actions (file deletion, app termination, shell execution) strictly require confirmation or authentication and are NEVER auto-executed.
+
