@@ -139,7 +139,7 @@ class TestSecretIsolationLongTaskE2E(unittest.IsolatedAsyncioTestCase):
 
         # Synthetic test secret (NEVER real credentials)
         self.secret_ref = "SYNTHETIC_E2E_SERVICE_KEY"
-        self.raw_secret = "synthetic-dummy-token-abc123456789xyz-strictly-for-test"
+        self.raw_secret = "sk-proj-syntheticsecrettesttoken1234567890abcdef"
 
         # Store in vault
         self.vault.store_secret(
