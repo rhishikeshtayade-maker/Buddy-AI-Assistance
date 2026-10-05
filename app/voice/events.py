@@ -71,3 +71,11 @@ class SpeechSynthesisFailedEvent(BaseEvent):
     text: str = ""
     error_type: str = "SynthesisError"
     message: str = "Speech synthesis failed"
+
+
+@dataclass(frozen=True)
+class WakeWordDetectedEvent(BaseEvent):
+    """Emitted when wake word activation phrase is recognized in audio."""
+
+    wake_word: str = "hey buddy"
+    confidence: float = 1.0

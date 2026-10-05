@@ -24,13 +24,14 @@ from app.voice.events import (
     VoiceListeningStartedEvent,
     VoiceListeningStoppedEvent,
     VoiceRecognitionFailedEvent,
+    WakeWordDetectedEvent,
 )
 from app.voice.exceptions import AudioCaptureError, STTError, TTSError, VoiceError
 from app.voice.models import AudioData, STTResult, VADState
 from app.voice.stt import MockSTTProvider, SpeechRecognitionSTTProvider, SpeechToTextProvider
 from app.voice.tts import MockTTSProvider, Pyttsx3TTSProvider, TextToSpeechProvider
 from app.voice.vad import EnergyVAD, VoiceActivityDetectorInterface
-from app.voice.wake import MockWakeWordDetector, WakeWordDetector
+from app.voice.wake import KeywordWakeWordDetector, MockWakeWordDetector, WakeWordDetector
 
 logger = logging.getLogger("buddy.voice.pipeline")
 
@@ -56,14 +57,20 @@ class VoicePipeline:
         self._device_manager = device_manager or AudioDeviceManager()
 
         # Initialize providers based on config or inject mock/explicit providers
+        self._stt = stt or self._create_default_stt()
+        self._tts = tts or self._create_default_tts()
         self._capture = capture or self._create_default_capture()
         self._vad = vad or EnergyVAD(
+            energy_threshold=getattr(config, "vad_energy_threshold", 60.0),
             silence_timeout=config.vad_silence_timeout,
             sample_rate=config.audio_sample_rate,
         )
-        self._stt = stt or self._create_default_stt()
-        self._tts = tts or self._create_default_tts()
-        self._wake_word = wake_word or MockWakeWordDetector(wake_word=config.wake_word)
+        if wake_word:
+            self._wake_word = wake_word
+        elif self._config.stt_provider.lower() != "mock":
+            self._wake_word = KeywordWakeWordDetector(stt_provider=self._stt, wake_word=config.wake_word)
+        else:
+            self._wake_word = MockWakeWordDetector(wake_word=config.wake_word)
 
         self._is_active = False
         self._cancel_requested = False
@@ -100,7 +107,8 @@ class VoicePipeline:
         return self._device_manager
 
     def _create_default_capture(self) -> AudioCaptureInterface:
-        if self._config.stt_provider.lower() == "mock" or not self._config.voice_enabled:
+        is_testing = getattr(self._config, "app_env", "").lower() == "testing"
+        if not self._config.voice_enabled or (is_testing and self._config.stt_provider.lower() == "mock"):
             return MockAudioCapture(
                 sample_rate=self._config.audio_sample_rate,
                 channels=self._config.audio_channels,
@@ -113,14 +121,25 @@ class VoicePipeline:
             )
         except Exception as e:
             logger.warning("Could not initialize hardware capture, falling back to mock: %s", e)
-            return MockAudioCapture()
+            return MockAudioCapture(
+                sample_rate=self._config.audio_sample_rate,
+                channels=self._config.audio_channels,
+            )
 
     def _create_default_stt(self) -> SpeechToTextProvider:
+        if self._config.stt_provider.lower() in ("speech_recognition", "google", "system"):
+            return SpeechRecognitionSTTProvider()
         if self._config.stt_provider.lower() == "mock":
             return MockSTTProvider()
         return SpeechRecognitionSTTProvider()
 
     def _create_default_tts(self) -> TextToSpeechProvider:
+        if self._config.tts_provider.lower() in ("pyttsx3", "system", "windows"):
+            try:
+                return Pyttsx3TTSProvider()
+            except Exception as e:
+                logger.warning("Could not initialize pyttsx3 TTS: %s", e)
+                return MockTTSProvider()
         if self._config.tts_provider.lower() == "mock":
             return MockTTSProvider()
         try:
@@ -310,3 +329,53 @@ class VoicePipeline:
             self._state_machine.transition_to(BuddyState.ERROR, reason=reason)
             if self._state_machine.can_transition_to(BuddyState.IDLE):
                 self._state_machine.transition_to(BuddyState.IDLE, reason="Recovery from error")
+
+    async def listen_for_wake_word(self, timeout: Optional[float] = None) -> bool:
+        """Capture audio utterance and test if configured wake word is present."""
+        async with self._lock:
+            self._cancel_requested = False
+            listen_timeout = timeout or 10.0
+            deadline = time.time() + listen_timeout
+
+            self._vad.reset()
+            try:
+                await self._capture.start()
+            except Exception as e:
+                logger.error("Failed to start audio capture for wake word: %s", e)
+                return False
+
+            try:
+                while not self._cancel_requested:
+                    if time.time() > deadline:
+                        break
+
+                    chunk = await self._capture.read_chunk(timeout=0.5)
+                    vad_state = self._vad.process_chunk(chunk)
+
+                    if vad_state == VADState.COMPLETED:
+                        break
+
+                    await asyncio.sleep(0.001)
+
+                if self._cancel_requested:
+                    await self._capture.cancel()
+                    return False
+
+                audio = await self._capture.stop()
+                if not audio or not audio.raw_data:
+                    return False
+
+                detected = await self._wake_word.detect(audio)
+                if detected:
+                    await self._event_bus.publish(
+                        WakeWordDetectedEvent(wake_word=self._wake_word.wake_word)
+                    )
+                return detected
+
+            except Exception as e:
+                logger.debug("Wake word detection loop error: %s", e)
+                try:
+                    await self._capture.cancel()
+                except Exception:
+                    pass
+                return False

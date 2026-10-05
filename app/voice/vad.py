@@ -43,7 +43,7 @@ class EnergyVAD(VoiceActivityDetectorInterface):
 
     def __init__(
         self,
-        energy_threshold: float = 300.0,
+        energy_threshold: float = 60.0,
         silence_timeout: float = 1.5,
         min_speech_duration: float = 0.3,
         max_recording_duration: float = 15.0,
@@ -62,6 +62,11 @@ class EnergyVAD(VoiceActivityDetectorInterface):
         self._silence_started_time: Optional[float] = None
         self._session_start_time: float = time.time()
         self._total_speech_bytes: int = 0
+
+    def calibrate_ambient(self, ambient_rms: float) -> None:
+        """Dynamically adjust energy threshold above the measured ambient room noise."""
+        self.energy_threshold = max(35.0, ambient_rms * 2.2)
+        logger.info("VAD: Calibrated to ambient RMS %.1f -> energy threshold: %.1f", ambient_rms, self.energy_threshold)
 
     @property
     def state(self) -> VADState:

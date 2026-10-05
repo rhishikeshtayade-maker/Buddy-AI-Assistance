@@ -19,6 +19,7 @@ from app.voice.events import (
     VoiceListeningStartedEvent,
     VoiceListeningStoppedEvent,
     VoiceRecognitionFailedEvent,
+    WakeWordDetectedEvent,
 )
 from app.voice.exceptions import (
     AudioCaptureError,
@@ -71,6 +72,7 @@ __all__ = [
     "SpeechStartedEvent",
     "SpeechStoppedEvent",
     "SpeechSynthesisFailedEvent",
+    "WakeWordDetectedEvent",
     # Exceptions
     "VoiceError",
     "AudioDeviceError",

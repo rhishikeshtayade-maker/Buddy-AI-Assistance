@@ -154,6 +154,10 @@ class BuddyConfig(BaseSettings):
         default=1.5,
         validation_alias="VAD_SILENCE_TIMEOUT",
     )
+    vad_energy_threshold: float = Field(
+        default=60.0,
+        validation_alias="VAD_ENERGY_THRESHOLD",
+    )
     log_transcripts: bool = Field(
         default=False,
         validation_alias="LOG_TRANSCRIPTS",
@@ -452,6 +456,7 @@ class BuddyConfig(BaseSettings):
             "BUDDY_AUDIO_CHANNELS": "AUDIO_CHANNELS",
             "BUDDY_VOICE_TIMEOUT": "VOICE_TIMEOUT",
             "BUDDY_VAD_SILENCE_TIMEOUT": "VAD_SILENCE_TIMEOUT",
+            "BUDDY_VAD_ENERGY_THRESHOLD": "VAD_ENERGY_THRESHOLD",
             "BUDDY_LOG_TRANSCRIPTS": "LOG_TRANSCRIPTS",
             "BUDDY_MEMORY_ENABLED": "MEMORY_ENABLED",
             "BUDDY_MEMORY_DATABASE_PATH": "MEMORY_DATABASE_PATH",
