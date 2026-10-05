@@ -28,7 +28,7 @@ from app.security.audit import AuditLogger, AuditRecord
 from app.security.authentication import Authenticator, MockAuthenticator
 from app.security.confirmation import ConfirmationManager
 from app.security.permissions import PermissionDecision, PermissionEngine
-from app.security.secrets.redaction import redact_structure
+from app.security.secrets.redaction import redact_string, redact_structure
 from app.tools.events import (
     ToolConfirmationRequiredEvent,
     ToolDeniedEvent,
@@ -322,8 +322,8 @@ class ToolExecutor:
                 execution_latency=time.perf_counter() - start_time,
             )
         except Exception as exec_err:
-            err_msg = f"Tool execution failed: {exec_err}"
-            logger.error("Tool '%s' execution error: %s", tool_name, exec_err, exc_info=True)
+            err_msg = redact_string(f"Tool execution failed: {exec_err}")
+            logger.error("Tool '%s' execution error: %s", tool_name, redact_string(str(exec_err)), exc_info=True)
             audit.execution_status = ToolExecutionStatus.FAILED.value
             audit.error_category = type(exec_err).__name__
             audit.execution_latency = time.perf_counter() - start_time
