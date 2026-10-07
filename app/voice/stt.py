@@ -11,9 +11,15 @@ import io
 import logging
 import time
 from abc import ABC, abstractmethod
-from typing import Optional
+from typing import Any, Optional
 
-from app.voice.exceptions import STTError
+from app.voice.exceptions import (
+    STTEmptyError,
+    STTError,
+    STTServiceError,
+    STTTimeoutError,
+    STTUnclearError,
+)
 from app.voice.models import AudioData, STTResult
 
 logger = logging.getLogger("buddy.voice.stt")
@@ -88,7 +94,20 @@ class MockSTTProvider(SpeechToTextProvider):
 
 
 class SpeechRecognitionSTTProvider(SpeechToTextProvider):
-    """Speech-to-Text provider backed by the Python speech_recognition library."""
+    """Speech-to-Text provider backed by the Python speech_recognition library.
+
+    Failure categories (all subclasses of STTError):
+      - STTEmptyError:   audio too short / provider returned nothing
+      - STTUnclearError: speech present but unintelligible
+      - STTServiceError: network / service / quota failure
+      - STTTimeoutError: bounded recognition timeout exceeded
+
+    Audio is held in memory only for the duration of the request; it is never
+    written to disk or logged.
+    """
+
+    # Minimum audio accepted for transcription (~0.15s of 16 kHz mono PCM16).
+    MIN_AUDIO_SECONDS = 0.15
 
     def __init__(self, engine: str = "google", timeout: float = 10.0) -> None:
         self._engine = engine
@@ -99,42 +118,57 @@ class SpeechRecognitionSTTProvider(SpeechToTextProvider):
     def provider_name(self) -> str:
         return f"speech_recognition_{self._engine}"
 
+    @property
+    def timeout(self) -> float:
+        return self._timeout
+
     def _get_recognizer(self) -> Any:
         if self._recognizer is None:
             try:
                 import speech_recognition as sr
                 self._recognizer = sr.Recognizer()
+                # Bound the underlying HTTP request so worker threads cannot hang forever.
+                self._recognizer.operation_timeout = self._timeout
             except ImportError as err:
-                raise STTError("speech_recognition package is not installed") from err
+                raise STTServiceError("speech_recognition package is not installed") from err
         return self._recognizer
+
+    @staticmethod
+    def _normalize_language(language: Optional[str]) -> str:
+        if not language or language.lower() == "en":
+            return "en-US"
+        return language
 
     async def transcribe(self, audio: AudioData, language: Optional[str] = "en") -> STTResult:
         if not audio or not audio.raw_data or len(audio.raw_data) < 100:
-            raise STTError("Audio buffer contains insufficient audio data for transcription")
+            raise STTEmptyError("Audio buffer contains insufficient audio data for transcription")
+        if audio.duration < self.MIN_AUDIO_SECONDS:
+            raise STTEmptyError(f"Audio too short for transcription ({audio.duration:.2f}s)")
 
-        import speech_recognition as sr
+        try:
+            import speech_recognition as sr
+        except ImportError as err:
+            raise STTServiceError("speech_recognition package is not installed") from err
 
         recognizer = self._get_recognizer()
 
-        # Wrap audio data into speech_recognition AudioData container
+        # Wrap audio data into speech_recognition AudioData container (in memory only)
         sr_audio = sr.AudioData(
             frame_data=audio.raw_data,
             sample_rate=audio.sample_rate,
             sample_width=audio.sample_width,
         )
+        lang = self._normalize_language(language)
 
         loop = asyncio.get_running_loop()
 
         def _do_transcribe() -> str:
             if self._engine == "google":
-                return recognizer.recognize_google(
-                    sr_audio,
-                    language=language or "en-US",
-                )
+                return recognizer.recognize_google(sr_audio, language=lang)
             elif self._engine == "sphinx":
                 return recognizer.recognize_sphinx(sr_audio)
             else:
-                raise STTError(f"Unsupported speech_recognition engine: '{self._engine}'")
+                raise STTServiceError(f"Unsupported speech_recognition engine: '{self._engine}'")
 
         try:
             # Run in worker thread to prevent blocking the async event loop
@@ -142,28 +176,29 @@ class SpeechRecognitionSTTProvider(SpeechToTextProvider):
                 loop.run_in_executor(None, _do_transcribe),
                 timeout=self._timeout,
             )
-
-            if not transcript or not transcript.strip():
-                raise STTError("STT returned empty transcript")
-
-            return STTResult(
-                transcript=transcript.strip(),
-                confidence=0.85,
-                language=language or "en",
-                duration=audio.duration,
-                provider=self.provider_name,
-                timestamp=time.time(),
-            )
-
         except asyncio.TimeoutError:
-            raise STTError(f"Transcription timed out after {self._timeout}s")
+            raise STTTimeoutError(f"Transcription timed out after {self._timeout}s")
         except sr.UnknownValueError:
-            # Speech was unintelligible
-            raise STTError("Audio was unintelligible or contained no recognizable speech")
+            raise STTUnclearError("Audio was unintelligible or contained no recognizable speech")
         except sr.RequestError as e:
-            # Network error or recognition service unavailable
-            raise STTError(f"STT recognition service error: {e}")
+            raise STTServiceError(f"STT recognition service error: {e}")
+        except STTError:
+            raise
+        except (TimeoutError, OSError) as e:
+            raise STTServiceError(f"STT network error: {e}") from e
         except Exception as e:
-            if isinstance(e, STTError):
-                raise
-            raise STTError(f"STT transcription failed: {e}") from e
+            raise STTServiceError(f"STT transcription failed: {e}") from e
+        finally:
+            del sr_audio
+
+        if not isinstance(transcript, str) or not transcript.strip():
+            raise STTEmptyError("STT returned empty transcript")
+
+        return STTResult(
+            transcript=transcript.strip(),
+            confidence=None,  # Google free API does not expose a reliable confidence here
+            language=lang,
+            duration=audio.duration,
+            provider=self.provider_name,
+            timestamp=time.time(),
+        )

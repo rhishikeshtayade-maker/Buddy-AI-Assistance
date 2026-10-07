@@ -26,11 +26,29 @@ from app.voice.events import (
     VoiceRecognitionFailedEvent,
     WakeWordDetectedEvent,
 )
-from app.voice.exceptions import AudioCaptureError, STTError, TTSError, VoiceError
-from app.voice.models import AudioData, STTResult, VADState
+from app.voice.exceptions import (
+    AudioCaptureError,
+    NoAudioFramesError,
+    STTEmptyError,
+    STTError,
+    STTServiceError,
+    STTTimeoutError,
+    STTUnclearError,
+    TTSError,
+    VoiceError,
+)
+from app.voice.models import (
+    AudioData,
+    CaptureDiagnostics,
+    ListenResult,
+    STTResult,
+    TranscriptionStatus,
+    VADState,
+    VoiceOutcome,
+)
 from app.voice.stt import MockSTTProvider, SpeechRecognitionSTTProvider, SpeechToTextProvider
 from app.voice.tts import MockTTSProvider, Pyttsx3TTSProvider, TextToSpeechProvider
-from app.voice.vad import EnergyVAD, VoiceActivityDetectorInterface
+from app.voice.vad import EnergyVAD, MockVAD, VoiceActivityDetectorInterface
 from app.voice.wake import KeywordWakeWordDetector, MockWakeWordDetector, WakeWordDetector
 
 logger = logging.getLogger("buddy.voice.pipeline")
@@ -154,10 +172,27 @@ class VoicePipeline:
         Expected State Flow:
         IDLE -> LISTENING -> (VAD speech + silence) -> THINKING -> STTResult
         """
+        result = await self.listen_with_diagnostics(timeout=timeout)
+        return result.stt_result if result.ok else None
+
+    async def listen_with_diagnostics(self, timeout: Optional[float] = None) -> ListenResult:
+        """Capture and transcribe with explicit outcome classification (A-G).
+
+        Taxonomy:
+          A: MIC_UNAVAILABLE     - AudioCapture failed to open/start
+          B: NO_FRAMES           - Stream started but 0 audio chunks arrived
+          C: SILENCE             - Chunks received but no speech activity
+          D: STT_FAILED          - Speech detected but transcription failed (empty/unclear/error)
+          G: TRANSCRIBED         - Transcription succeeded with valid text
+        """
         async with self._lock:
             start_pipeline_time = time.perf_counter()
             self._cancel_requested = False
             listen_timeout = timeout or self._config.voice_timeout
+            diag = CaptureDiagnostics(
+                energy_threshold=getattr(self._vad, "energy_threshold", 0.0),
+                noise_floor=getattr(self._vad, "noise_floor", 0.0) or 0.0,
+            )
 
             # 1. State Transition: IDLE -> LISTENING
             if self._state_machine.can_transition_to(BuddyState.LISTENING):
@@ -170,7 +205,11 @@ class VoicePipeline:
                     "Cannot start listening from state %s",
                     self._state_machine.current_state.value,
                 )
-                return None
+                return ListenResult(
+                    outcome=VoiceOutcome.ROUTING_FAILED,
+                    error_message=f"Invalid start state: {self._state_machine.current_state.value}",
+                    diagnostics=diag,
+                )
 
             await self._event_bus.publish(
                 VoiceListeningStartedEvent(
@@ -184,18 +223,32 @@ class VoicePipeline:
             capture_start_time = time.perf_counter()
             try:
                 await self._capture.start()
+                diag.stream_opened = True
                 self.last_capture_latency = time.perf_counter() - capture_start_time
             except Exception as err:
                 logger.error("Audio capture failed to start: %s", err)
+                diag.stream_opened = False
+                diag.error = str(err)
                 await self._handle_recognition_failure(
                     "AudioCaptureError",
                     f"Microphone capture error: {err}",
                 )
-                return None
+                return ListenResult(
+                    outcome=VoiceOutcome.MIC_UNAVAILABLE,
+                    error_message=str(err),
+                    diagnostics=diag,
+                    capture_latency=time.perf_counter() - capture_start_time,
+                    total_latency=time.perf_counter() - start_pipeline_time,
+                )
 
             # 3. Stream chunks into VAD until utterance completion or timeout
             vad_start_time = time.perf_counter()
             deadline = time.time() + listen_timeout
+            chunks_received = 0
+            bytes_received = 0
+            first_chunk_t = None
+            peak_rms = 0.0
+            sum_rms = 0.0
 
             try:
                 while not self._cancel_requested:
@@ -203,14 +256,30 @@ class VoicePipeline:
                         raise asyncio.TimeoutError(f"Listening timed out after {listen_timeout}s")
 
                     chunk = await self._capture.read_chunk(timeout=0.5)
-                    vad_state = self._vad.process_chunk(chunk)
+                    if first_chunk_t is None:
+                        first_chunk_t = time.perf_counter() - vad_start_time
+                    chunks_received += 1
+                    bytes_received += len(chunk)
 
+                    chunk_rms = getattr(self._vad, "last_rms", 0.0) or EnergyVAD.calculate_chunk_rms(chunk)
+                    peak_rms = max(peak_rms, chunk_rms)
+                    sum_rms += chunk_rms
+
+                    vad_state = self._vad.process_chunk(chunk)
                     if vad_state == VADState.COMPLETED:
                         break
 
                     await asyncio.sleep(0.001)
 
                 self.last_vad_latency = time.perf_counter() - vad_start_time
+                diag.chunks_received = chunks_received
+                diag.bytes_received = bytes_received
+                diag.first_chunk_latency = first_chunk_t
+                diag.peak_rms = peak_rms
+                diag.mean_rms = (sum_rms / chunks_received) if chunks_received > 0 else 0.0
+                diag.speech_detected = getattr(self._vad, "has_speech", False)
+                diag.speech_seconds = getattr(self._vad, "last_speech_seconds", 0.0)
+                diag.termination = getattr(self._vad, "completion_reason", "completed") or "completed"
 
                 if self._cancel_requested:
                     await self._capture.cancel()
@@ -218,16 +287,47 @@ class VoicePipeline:
                         VoiceListeningStoppedEvent(reason="Capture cancelled")
                     )
                     self._recover_to_idle("Listening cancelled")
-                    return None
+                    return ListenResult(
+                        outcome=VoiceOutcome.CANCELLED,
+                        error_message="Listening cancelled",
+                        diagnostics=diag,
+                    )
+
+                # Check if frames were received
+                if chunks_received == 0:
+                    await self._capture.stop()
+                    await self._handle_recognition_failure("NoAudioFramesError", "No audio frames received from microphone")
+                    return ListenResult(
+                        outcome=VoiceOutcome.NO_FRAMES,
+                        error_message="Microphone opened but delivered no audio frames",
+                        diagnostics=diag,
+                        total_latency=time.perf_counter() - start_pipeline_time,
+                    )
 
                 # 4. Stop capture and retrieve AudioData
                 audio = await self._capture.stop()
+                diag.window_seconds = audio.duration
+                diag.utterance_seconds = audio.duration
+
                 await self._event_bus.publish(
                     VoiceListeningStoppedEvent(
                         reason="Utterance completed",
                         duration=audio.duration,
                     )
                 )
+
+                # If no speech activity detected (pure silence)
+                is_mock_vad = isinstance(self._vad, MockVAD)
+                if not is_mock_vad and not diag.speech_detected and audio.duration < 0.2:
+                    self._recover_to_idle("No speech detected (silence)")
+                    await self._handle_recognition_failure("SilenceError", "No speech detected (silence)")
+                    return ListenResult(
+                        outcome=VoiceOutcome.SILENCE,
+                        transcription_status=TranscriptionStatus.NOT_ATTEMPTED,
+                        diagnostics=diag,
+                        capture_latency=time.perf_counter() - vad_start_time,
+                        total_latency=time.perf_counter() - start_pipeline_time,
+                    )
 
                 # 5. State Transition: LISTENING -> THINKING
                 if self._state_machine.can_transition_to(BuddyState.THINKING):
@@ -238,45 +338,85 @@ class VoicePipeline:
 
                 # 6. Transcribe via STT provider
                 stt_start_time = time.perf_counter()
-                stt_result = await self._stt.transcribe(audio)
-                self.last_stt_latency = time.perf_counter() - stt_start_time
-                self.last_pipeline_latency = time.perf_counter() - start_pipeline_time
+                try:
+                    stt_result = await self._stt.transcribe(audio)
+                    self.last_stt_latency = time.perf_counter() - stt_start_time
+                    self.last_pipeline_latency = time.perf_counter() - start_pipeline_time
 
-                # 7. Privacy: Log transcript respecting privacy configuration
-                if self._config.log_transcripts:
-                    logger.debug("Transcribed speech: '%s' (conf=%.2f)", stt_result.transcript, stt_result.confidence or 0.0)
-                else:
-                    logger.debug("Transcribed speech received (length=%d chars, duration=%.2fs)", len(stt_result.transcript), audio.duration)
+                    # Privacy log
+                    if self._config.log_transcripts:
+                        logger.debug("Transcribed speech: '%s' (conf=%.2f)", stt_result.transcript, stt_result.confidence or 0.0)
+                    else:
+                        logger.debug("Transcribed speech received (length=%d chars, duration=%.2fs)", len(stt_result.transcript), audio.duration)
 
-                # 8. Publish VoiceCommandReceivedEvent
-                await self._event_bus.publish(
-                    VoiceCommandReceivedEvent(
-                        transcript=stt_result.transcript,
-                        confidence=stt_result.confidence,
-                        duration=stt_result.duration,
-                        provider=stt_result.provider,
+                    # Publish VoiceCommandReceivedEvent
+                    await self._event_bus.publish(
+                        VoiceCommandReceivedEvent(
+                            transcript=stt_result.transcript,
+                            confidence=stt_result.confidence,
+                            duration=stt_result.duration,
+                            provider=stt_result.provider,
+                        )
                     )
-                )
 
-                return stt_result
+                    return ListenResult(
+                        outcome=VoiceOutcome.TRANSCRIBED,
+                        transcription_status=TranscriptionStatus.TRANSCRIPTION_SUCCESS,
+                        stt_result=stt_result,
+                        diagnostics=diag,
+                        capture_latency=self.last_vad_latency,
+                        stt_latency=self.last_stt_latency,
+                        total_latency=self.last_pipeline_latency,
+                    )
+
+                except STTEmptyError as err:
+                    logger.info("STT returned empty transcript: %s", err)
+                    await self._handle_recognition_failure("STTEmptyError", str(err))
+                    return ListenResult(
+                        outcome=VoiceOutcome.STT_FAILED,
+                        transcription_status=TranscriptionStatus.TRANSCRIPTION_EMPTY,
+                        error_message=str(err),
+                        diagnostics=diag,
+                    )
+                except STTUnclearError as err:
+                    logger.info("Speech was unclear/unintelligible: %s", err)
+                    await self._handle_recognition_failure("STTUnclearError", str(err))
+                    return ListenResult(
+                        outcome=VoiceOutcome.STT_FAILED,
+                        transcription_status=TranscriptionStatus.TRANSCRIPTION_UNCLEAR,
+                        error_message=str(err),
+                        diagnostics=diag,
+                    )
+                except (STTServiceError, STTTimeoutError, STTError) as err:
+                    logger.warning("STT service error: %s", err)
+                    await self._handle_recognition_failure(type(err).__name__, str(err))
+                    return ListenResult(
+                        outcome=VoiceOutcome.STT_FAILED,
+                        transcription_status=TranscriptionStatus.TRANSCRIPTION_ERROR,
+                        error_message=str(err),
+                        diagnostics=diag,
+                    )
 
             except asyncio.TimeoutError:
                 logger.info("Voice listening timed out after %.1fs", listen_timeout)
                 await self._capture.cancel()
                 await self._handle_recognition_failure("TimeoutError", "Listening timed out")
-                return None
-
-            except STTError as err:
-                logger.warning("STT transcription failed: %s", err)
-                await self._capture.cancel()
-                await self._handle_recognition_failure("STTError", str(err))
-                return None
+                diag.chunks_received = chunks_received
+                return ListenResult(
+                    outcome=VoiceOutcome.SILENCE if chunks_received > 0 else VoiceOutcome.NO_FRAMES,
+                    error_message=f"Listening timed out after {listen_timeout}s",
+                    diagnostics=diag,
+                )
 
             except Exception as err:
                 logger.error("Unhandled voice pipeline error: %s", err, exc_info=True)
                 await self._capture.cancel()
                 await self._handle_recognition_failure(type(err).__name__, str(err))
-                return None
+                return ListenResult(
+                    outcome=VoiceOutcome.MIC_UNAVAILABLE if not diag.stream_opened else VoiceOutcome.STT_FAILED,
+                    error_message=str(err),
+                    diagnostics=diag,
+                )
 
     async def speak(self, text: str, interruptible: bool = True) -> None:
         """Voicing response through Text-to-Speech provider with lifecycle events."""

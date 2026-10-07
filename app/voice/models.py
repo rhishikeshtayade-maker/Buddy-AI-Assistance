@@ -100,3 +100,91 @@ class STTResult:
     duration: float = 0.0
     provider: str = "mock"
     timestamp: float = field(default_factory=time.time)
+
+
+# ---------------------------------------------------------------------------
+# Loop 13: Explicit live-voice outcome taxonomy & diagnostics
+# ---------------------------------------------------------------------------
+
+
+class TranscriptionStatus(str, Enum):
+    """Fine-grained status of a single listen/transcribe attempt."""
+
+    LISTENING = "LISTENING"
+    SPEECH_DETECTED = "SPEECH_DETECTED"
+    TRANSCRIBING = "TRANSCRIBING"
+    TRANSCRIPTION_SUCCESS = "TRANSCRIPTION_SUCCESS"
+    TRANSCRIPTION_EMPTY = "TRANSCRIPTION_EMPTY"
+    TRANSCRIPTION_UNCLEAR = "TRANSCRIPTION_UNCLEAR"
+    TRANSCRIPTION_ERROR = "TRANSCRIPTION_ERROR"
+    NOT_ATTEMPTED = "NOT_ATTEMPTED"
+
+
+class VoiceOutcome(str, Enum):
+    """End-to-end voice turn outcome. Each failure mode is distinct by design.
+
+    A  MIC_UNAVAILABLE      - microphone could not be opened
+    B  NO_FRAMES            - stream opened but no audio frames arrived
+    C  SILENCE              - frames arrived but no speech was detected
+    D  STT_FAILED           - speech detected but transcription failed
+    E  ROUTING_FAILED       - transcript obtained but command processing failed
+    F  VERIFICATION_FAILED  - action executed but could not be verified / was blocked
+    G  SUCCESS              - everything succeeded
+    """
+
+    MIC_UNAVAILABLE = "MIC_UNAVAILABLE"
+    NO_FRAMES = "NO_FRAMES"
+    SILENCE = "SILENCE"
+    STT_FAILED = "STT_FAILED"
+    ROUTING_FAILED = "ROUTING_FAILED"
+    VERIFICATION_FAILED = "VERIFICATION_FAILED"
+    ACTION_BLOCKED = "ACTION_BLOCKED"
+    SUCCESS = "SUCCESS"
+    CANCELLED = "CANCELLED"
+    # Intermediate: listening layer succeeded and produced a transcript.
+    TRANSCRIBED = "TRANSCRIBED"
+
+
+@dataclass
+class CaptureDiagnostics:
+    """Privacy-safe numeric diagnostics of one bounded capture window.
+
+    Contains NO audio samples and NO transcript text.
+    """
+
+    stream_opened: bool = False
+    chunks_received: int = 0
+    bytes_received: int = 0
+    window_seconds: float = 0.0
+    first_chunk_latency: Optional[float] = None
+    peak_rms: float = 0.0
+    mean_rms: float = 0.0
+    noise_floor: float = 0.0
+    energy_threshold: float = 0.0
+    speech_detected: bool = False
+    speech_seconds: float = 0.0
+    utterance_seconds: float = 0.0
+    termination: str = "unknown"
+    error: Optional[str] = None
+
+
+@dataclass
+class ListenResult:
+    """Result of a categorized listen attempt (capture -> VAD -> STT)."""
+
+    outcome: VoiceOutcome
+    transcription_status: TranscriptionStatus = TranscriptionStatus.NOT_ATTEMPTED
+    stt_result: Optional[STTResult] = None
+    diagnostics: CaptureDiagnostics = field(default_factory=CaptureDiagnostics)
+    error_message: Optional[str] = None
+    capture_latency: float = 0.0
+    stt_latency: float = 0.0
+    total_latency: float = 0.0
+
+    @property
+    def transcript(self) -> str:
+        return self.stt_result.transcript if self.stt_result else ""
+
+    @property
+    def ok(self) -> bool:
+        return self.outcome == VoiceOutcome.TRANSCRIBED and bool(self.transcript.strip())

@@ -124,7 +124,15 @@ class MockTTSProvider(TextToSpeechProvider):
 
 
 class Pyttsx3TTSProvider(TextToSpeechProvider):
-    """Local, offline Text-to-Speech provider backed by pyttsx3."""
+    """Local, offline Text-to-Speech provider backed by pyttsx3.
+
+    Loop 13 hardening:
+      - Never speaks raw secrets (passed through redact_string before synthesis).
+      - Handles empty/whitespace text gracefully without raising fatal exceptions.
+      - Tracks active engine reference for immediate cancellation on stop().
+      - Non-blocking execution in executor thread.
+      - Prevents engine resource leak.
+    """
 
     def __init__(
         self,
@@ -136,7 +144,7 @@ class Pyttsx3TTSProvider(TextToSpeechProvider):
         self._volume = volume
         self._voice_id = voice_id
         self._is_speaking = False
-        self._engine: Optional[Any] = None
+        self._active_engine: Optional[Any] = None
         self._lock = threading.Lock()
         self._stop_requested = False
 
@@ -161,15 +169,19 @@ class Pyttsx3TTSProvider(TextToSpeechProvider):
         if not text or not text.strip():
             raise TTSError("Cannot synthesize empty text")
 
-        # Pyttsx3 does direct audio output; for synthesis to buffer, generate wav bytes
-        # or fallback to short synthetic PCM buffer
+        # Pyttsx3 does direct audio output; for synthesis to buffer, generate short synthetic PCM buffer
         num_samples = int(16000 * 0.1)
         raw_pcm = b"\x00\x00" * num_samples
         return AudioData(raw_data=raw_pcm, sample_rate=16000, sample_width=2, channels=1)
 
     async def speak(self, text: str, interruptible: bool = True) -> None:
         if not text or not text.strip():
-            raise TTSError("Cannot speak empty text")
+            logger.debug("Pyttsx3TTSProvider: empty text passed, skipping.")
+            return
+
+        # Security check: redact any secrets before speech output
+        from app.security.secrets.redaction import redact_string
+        safe_text = redact_string(text.strip())
 
         self._is_speaking = True
         self._stop_requested = False
@@ -178,31 +190,45 @@ class Pyttsx3TTSProvider(TextToSpeechProvider):
 
         def _do_speak() -> None:
             with self._lock:
+                if self._stop_requested:
+                    return
                 try:
                     engine = self._init_engine()
-                    engine.say(text)
-                    engine.runAndWait()
+                    self._active_engine = engine
                 except Exception as e:
-                    logger.warning("pyttsx3 engine error: %s", e)
-                finally:
-                    try:
-                        engine.stop()
-                    except Exception:
-                        pass
+                    logger.warning("Failed to initialize pyttsx3 engine: %s", e)
+                    return
+
+            try:
+                if not self._stop_requested and self._active_engine:
+                    self._active_engine.say(safe_text)
+                    self._active_engine.runAndWait()
+            except Exception as e:
+                logger.warning("pyttsx3 speech error: %s", e)
+            finally:
+                with self._lock:
+                    if self._active_engine:
+                        try:
+                            self._active_engine.stop()
+                        except Exception:
+                            pass
+                        self._active_engine = None
 
         try:
             await loop.run_in_executor(None, _do_speak)
         except Exception as e:
+            logger.error("TTS playback error: %s", e)
             raise TTSError(f"TTS playback error: {e}") from e
         finally:
             self._is_speaking = False
 
     async def stop(self) -> None:
+        """Interrupt and halt any active speech playback."""
         self._stop_requested = True
         self._is_speaking = False
         with self._lock:
-            if self._engine is not None:
+            if self._active_engine is not None:
                 try:
-                    self._engine.stop()
-                except Exception:
-                    pass
+                    self._active_engine.stop()
+                except Exception as e:
+                    logger.debug("Error stopping active pyttsx3 engine: %s", e)

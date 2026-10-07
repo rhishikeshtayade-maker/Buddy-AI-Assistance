@@ -12,7 +12,7 @@ import queue
 import struct
 import time
 from abc import ABC, abstractmethod
-from typing import AsyncIterator, Optional, Union
+from typing import Any, AsyncIterator, Optional, Union
 
 from app.voice.exceptions import AudioCaptureError, AudioDeviceError
 from app.voice.models import AudioData
@@ -140,7 +140,22 @@ class MockAudioCapture(AudioCaptureInterface):
 
 
 class SoundDeviceAudioCapture(AudioCaptureInterface):
-    """Hardware microphone audio capture utilizing sounddevice."""
+    """Hardware microphone audio capture utilizing sounddevice.
+
+    Loop 13 hardening:
+      * ``persistent=True`` keeps the PortAudio stream open between capture
+        windows (opening the Realtek stream costs ~0.7s on real hardware, which
+        otherwise clips the start of the user's speech). Frames are only
+        *collected* between ``start()`` and ``stop()/cancel()``; outside a
+        window the callback drops them immediately. ``close()`` must be called
+        at shutdown to release the device.
+      * Bounded frame queue (drop-oldest on overflow) and bounded accumulation
+        buffer, so a stalled consumer can never grow memory without limit.
+      * Frame counters (``total_chunks_received``, ``window_chunks_received``,
+        ``overflow_count``) prove that real frames are arriving.
+      * Start-up warm-up frames are discarded after a stream (re)opens.
+      * Audio is held in memory only; it is never written to disk or logged.
+    """
 
     def __init__(
         self,
@@ -148,22 +163,48 @@ class SoundDeviceAudioCapture(AudioCaptureInterface):
         sample_rate: int = 16000,
         channels: int = 1,
         chunk_size: int = 1024,
+        persistent: bool = False,
+        max_queue_chunks: int = 256,
+        max_buffer_seconds: float = 30.0,
+        warmup_seconds: float = 0.1,
     ) -> None:
         self._device_id = device_id
         self._sample_rate = sample_rate
         self._channels = channels
         self._chunk_size = chunk_size
         self._sample_width = 2
+        self._persistent = persistent
+        self._max_buffer_bytes = int(max_buffer_seconds * sample_rate * channels * self._sample_width)
+        self._warmup_bytes = int(warmup_seconds * sample_rate * channels * self._sample_width)
 
         self._stream: Optional[Any] = None
-        self._queue: queue.Queue[bytes] = queue.Queue()
+        self._queue: queue.Queue[bytes] = queue.Queue(maxsize=max_queue_chunks)
         self._is_capturing = False
         self._accumulated_bytes = bytearray()
         self._lock = asyncio.Lock()
+        self._warmup_remaining = 0
+
+        # Diagnostics (numeric only; no audio content)
+        self.total_chunks_received = 0
+        self.window_chunks_received = 0
+        self.overflow_count = 0
+        self.status_warning_count = 0
+        self.streams_opened = 0
+        self.streams_closed = 0
+        self.last_open_latency: float = 0.0
+        self.resolved_device_index: Optional[int] = None
 
     @property
     def is_capturing(self) -> bool:
         return self._is_capturing
+
+    @property
+    def is_stream_open(self) -> bool:
+        return self._stream is not None
+
+    @property
+    def persistent(self) -> bool:
+        return self._persistent
 
     @property
     def sample_rate(self) -> int:
@@ -176,90 +217,150 @@ class SoundDeviceAudioCapture(AudioCaptureInterface):
     def _audio_callback(self, indata: Any, frames: int, time_info: Any, status: Any) -> None:
         """Callback invoked by portaudio in a separate OS audio thread."""
         if status:
-            logger.debug("SoundDevice status warning: %s", status)
-        if self._is_capturing:
-            # indata is float32 or int16 numpy array; convert to 16-bit PCM bytes
-            raw_pcm = bytes(indata)
+            self.status_warning_count += 1
+        if not self._is_capturing:
+            return
+        raw_pcm = bytes(indata)
+        if self._warmup_remaining > 0:
+            self._warmup_remaining -= len(raw_pcm)
+            return
+        self.total_chunks_received += 1
+        try:
             self._queue.put_nowait(raw_pcm)
+        except queue.Full:
+            # Drop the oldest chunk to keep latency bounded
+            self.overflow_count += 1
+            try:
+                self._queue.get_nowait()
+                self._queue.put_nowait(raw_pcm)
+            except (queue.Empty, queue.Full):
+                pass
+
+    def _drain_queue(self) -> None:
+        while True:
+            try:
+                self._queue.get_nowait()
+            except queue.Empty:
+                break
+
+    def _resolve_device(self, sd: Any) -> Optional[int]:
+        if self._device_id is None or str(self._device_id).lower() == "default":
+            return None
+        if isinstance(self._device_id, int):
+            return self._device_id
+        if str(self._device_id).isdigit():
+            return int(str(self._device_id))
+        devices = sd.query_devices()
+        for idx, d in enumerate(devices):
+            if str(self._device_id).lower() in d["name"].lower() and d["max_input_channels"] > 0:
+                return idx
+        raise AudioDeviceError(f"Input device '{self._device_id}' not found", device_name=str(self._device_id))
+
+    async def _open_stream_locked(self) -> None:
+        if self._stream is not None:
+            return
+        try:
+            import sounddevice as sd
+        except ImportError as err:
+            raise AudioCaptureError("sounddevice package is required for hardware capture") from err
+
+        dev_idx = self._resolve_device(sd)
+        self.resolved_device_index = dev_idx
+        t0 = time.perf_counter()
+        stream = None
+        try:
+            stream = sd.RawInputStream(
+                samplerate=self._sample_rate,
+                channels=self._channels,
+                dtype="int16",
+                blocksize=self._chunk_size,
+                device=dev_idx,
+                callback=self._audio_callback,
+            )
+            stream.start()
+        except Exception as e:
+            if stream is not None:
+                try:
+                    stream.close()
+                except Exception:
+                    pass
+            raise AudioCaptureError(f"Failed to initialize audio capture stream: {e}") from e
+        self._stream = stream
+        self.streams_opened += 1
+        self._warmup_remaining = self._warmup_bytes
+        self.last_open_latency = time.perf_counter() - t0
+        logger.info(
+            "SoundDeviceAudioCapture stream opened (device=%s, rate=%d, channels=%d, %.0f ms)",
+            dev_idx,
+            self._sample_rate,
+            self._channels,
+            self.last_open_latency * 1000,
+        )
+
+    def _close_stream_locked(self) -> None:
+        stream, self._stream = self._stream, None
+        if stream is None:
+            return
+        try:
+            stream.stop()
+        except Exception as e:
+            logger.warning("Error stopping audio stream: %s", e)
+        try:
+            stream.close()
+        except Exception as e:
+            logger.warning("Error closing audio stream: %s", e)
+        self.streams_closed += 1
+        logger.info("SoundDeviceAudioCapture stream closed.")
+
+    async def open(self) -> None:
+        """Open (and keep open) the underlying stream without starting collection."""
+        async with self._lock:
+            await self._open_stream_locked()
+
+    async def close(self) -> None:
+        """Fully release the microphone. Idempotent; safe to call at shutdown."""
+        async with self._lock:
+            self._is_capturing = False
+            self._close_stream_locked()
+            self._drain_queue()
+            self._accumulated_bytes.clear()
 
     async def start(self) -> None:
         async with self._lock:
             if self._is_capturing:
                 return
-
+            self._accumulated_bytes.clear()
+            self._drain_queue()
+            self.window_chunks_received = 0
             try:
-                import sounddevice as sd
-            except ImportError as err:
-                raise AudioCaptureError("sounddevice package is required for hardware capture") from err
-
-            # Resolve device ID if 'default' or str
-            dev_idx = None
-            if self._device_id is not None and str(self._device_id).lower() != "default":
-                if isinstance(self._device_id, int):
-                    dev_idx = self._device_id
-                else:
-                    # Resolve device by name
-                    devices = sd.query_devices()
-                    for idx, d in enumerate(devices):
-                        if str(self._device_id).lower() in d["name"].lower() and d["max_input_channels"] > 0:
-                            dev_idx = idx
-                            break
-
-            try:
-                self._accumulated_bytes.clear()
-                while not self._queue.empty():
-                    self._queue.get_nowait()
-
-                self._stream = sd.RawInputStream(
-                    samplerate=self._sample_rate,
-                    channels=self._channels,
-                    dtype="int16",
-                    blocksize=self._chunk_size,
-                    device=dev_idx,
-                    callback=self._audio_callback,
-                )
-                self._stream.start()
-                self._is_capturing = True
-                logger.info(
-                    "SoundDeviceAudioCapture started (device=%s, rate=%d, channels=%d)",
-                    dev_idx,
-                    self._sample_rate,
-                    self._channels,
-                )
-            except Exception as e:
+                await self._open_stream_locked()
+            except Exception:
                 self._is_capturing = False
-                raise AudioCaptureError(f"Failed to initialize audio capture stream: {e}") from e
+                raise
+            # Discard anything captured before this window started (stale audio)
+            self._drain_queue()
+            self._is_capturing = True
 
     async def stop(self) -> AudioData:
         async with self._lock:
-            if not self._is_capturing:
-                return AudioData(
-                    raw_data=bytes(self._accumulated_bytes),
-                    sample_rate=self._sample_rate,
-                    sample_width=self._sample_width,
-                    channels=self._channels,
-                )
-
+            was_capturing = self._is_capturing
             self._is_capturing = False
-            if self._stream is not None:
-                try:
-                    self._stream.stop()
-                    self._stream.close()
-                except Exception as e:
-                    logger.warning("Error stopping audio stream: %s", e)
-                finally:
-                    self._stream = None
+            if not self._persistent:
+                self._close_stream_locked()
 
-            # Drain any remaining chunks in queue
-            while not self._queue.empty():
-                try:
-                    self._accumulated_bytes.extend(self._queue.get_nowait())
-                except queue.Empty:
-                    break
+            if was_capturing:
+                # Drain any remaining chunks in queue
+                while True:
+                    try:
+                        self._append_bounded(self._queue.get_nowait())
+                    except queue.Empty:
+                        break
 
-            logger.info("SoundDeviceAudioCapture stopped. Total duration: %.2fs", len(self._accumulated_bytes) / (self._sample_rate * 2))
+            data = bytes(self._accumulated_bytes)
+            self._accumulated_bytes.clear()
+            logger.debug("SoundDeviceAudioCapture window stopped. Duration: %.2fs", len(data) / (self._sample_rate * 2))
             return AudioData(
-                raw_data=bytes(self._accumulated_bytes),
+                raw_data=data,
                 sample_rate=self._sample_rate,
                 sample_width=self._sample_width,
                 channels=self._channels,
@@ -268,36 +369,32 @@ class SoundDeviceAudioCapture(AudioCaptureInterface):
     async def cancel(self) -> None:
         async with self._lock:
             self._is_capturing = False
-            if self._stream is not None:
-                try:
-                    self._stream.stop()
-                    self._stream.close()
-                except Exception:
-                    pass
-                finally:
-                    self._stream = None
+            if not self._persistent:
+                self._close_stream_locked()
             self._accumulated_bytes.clear()
-            while not self._queue.empty():
-                try:
-                    self._queue.get_nowait()
-                except queue.Empty:
-                    break
-            logger.debug("SoundDeviceAudioCapture cancelled.")
+            self._drain_queue()
+            logger.debug("SoundDeviceAudioCapture window cancelled.")
+
+    def _append_bounded(self, chunk: bytes) -> None:
+        self._accumulated_bytes.extend(chunk)
+        overflow = len(self._accumulated_bytes) - self._max_buffer_bytes
+        if overflow > 0:
+            del self._accumulated_bytes[:overflow]
 
     async def read_chunk(self, timeout: Optional[float] = None) -> bytes:
         if not self._is_capturing:
             raise AudioCaptureError("Audio capture is not active")
 
-        loop = asyncio.get_running_loop()
-        deadline = (time.time() + timeout) if timeout else None
+        deadline = (time.monotonic() + timeout) if timeout else None
 
         while self._is_capturing:
             try:
                 chunk = self._queue.get_nowait()
-                self._accumulated_bytes.extend(chunk)
+                self._append_bounded(chunk)
+                self.window_chunks_received += 1
                 return chunk
             except queue.Empty:
-                if deadline and time.time() > deadline:
+                if deadline and time.monotonic() > deadline:
                     raise asyncio.TimeoutError("Timeout waiting for audio chunk")
                 await asyncio.sleep(0.01)
 

@@ -133,6 +133,7 @@ async def run_voice_assistant() -> None:
     capture = SoundDeviceAudioCapture(
         sample_rate=config.audio_sample_rate,
         channels=config.audio_channels,
+        persistent=True,
     )
     vad = EnergyVAD(
         energy_threshold=getattr(config, "vad_energy_threshold", 60.0),
@@ -206,83 +207,91 @@ async def run_voice_assistant() -> None:
     print("  2. Or press [ENTER] / [SPACE] to talk immediately.")
     print("  3. Say 'exit' or press Ctrl+C to terminate.\n")
 
-    while True:
-        try:
-            print("Listening for wake word ('Hey BUDDY') or press [ENTER] to speak...")
+    try:
+        while True:
+            try:
+                print("Listening for wake word ('Hey BUDDY') or press [ENTER] to speak...")
 
-            listen_task = asyncio.create_task(pipeline.listen_for_wake_word(timeout=8.0))
-            key_task = asyncio.create_task(check_keyboard_activation())
+                listen_task = asyncio.create_task(pipeline.listen_for_wake_word(timeout=8.0))
+                key_task = asyncio.create_task(check_keyboard_activation())
 
-            done, pending = await asyncio.wait(
-                [listen_task, key_task],
-                return_when=asyncio.FIRST_COMPLETED,
-            )
+                done, pending = await asyncio.wait(
+                    [listen_task, key_task],
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
 
-            for t in pending:
-                t.cancel()
-                try:
-                    await t
-                except (asyncio.CancelledError, Exception):
-                    pass
+                for t in pending:
+                    t.cancel()
+                    try:
+                        await t
+                    except (asyncio.CancelledError, Exception):
+                        pass
 
-            activated = False
-            if listen_task in done:
-                try:
-                    if listen_task.result():
-                        print("\n[!] Wake word 'Hey BUDDY' detected!")
-                        activated = True
-                except Exception:
-                    pass
+                activated = False
+                if listen_task in done:
+                    try:
+                        if listen_task.result():
+                            print("\n[!] Wake word 'Hey BUDDY' detected!")
+                            activated = True
+                    except Exception:
+                        pass
 
-            if key_task in done and not activated:
-                try:
-                    if key_task.result():
-                        print("\n[!] Activated by keypress.")
-                        activated = True
-                except Exception:
-                    pass
+                if key_task in done and not activated:
+                    try:
+                        if key_task.result():
+                            print("\n[!] Activated by keypress.")
+                            activated = True
+                    except Exception:
+                        pass
 
-            if activated:
-                # Audible prompt
-                try:
-                    await pipeline.speak("I'm listening.")
-                except Exception:
-                    pass
+                if activated:
+                    # Audible prompt
+                    try:
+                        await pipeline.speak("I'm listening.")
+                    except Exception:
+                        pass
 
-                print(">>> LISTENING FOR YOUR COMMAND (speak now)... <<<")
-                stt_result = await pipeline.listen_for_command(timeout=7.0)
+                    print(">>> LISTENING FOR YOUR COMMAND (speak now)... <<<")
+                    listen_res = await pipeline.listen_with_diagnostics(timeout=7.0)
 
-                if stt_result and stt_result.transcript:
-                    user_cmd = stt_result.transcript.strip()
-                    print(f"\nYou said: \"{user_cmd}\"")
+                    if listen_res.ok and listen_res.transcript:
+                        user_cmd = listen_res.transcript.strip()
+                        print(f"\nYou said: \"{user_cmd}\" (latency: capture={listen_res.capture_latency:.2f}s, stt={listen_res.stt_latency:.2f}s)")
 
-                    # Check exit commands
-                    if user_cmd.lower() in ("exit", "quit", "goodbye", "bye", "shutdown"):
-                        farewell = "Goodbye! Have a great day."
-                        print(f"BUDDY: {farewell}")
-                        await pipeline.speak(farewell)
-                        break
+                        # Check exit commands
+                        if user_cmd.lower() in ("exit", "quit", "goodbye", "bye", "shutdown"):
+                            farewell = "Goodbye! Have a great day."
+                            print(f"BUDDY: {farewell}")
+                            await pipeline.speak(farewell)
+                            break
 
-                    # Check direct tool / system actions first
-                    handled, direct_response = await execute_direct_command(user_cmd, tool_executor)
-                    if handled:
-                        print(f"BUDDY: {direct_response}\n")
-                        await pipeline.speak(direct_response)
+                        # Check direct tool / system actions first
+                        handled, direct_response = await execute_direct_command(user_cmd, tool_executor)
+                        if handled:
+                            print(f"BUDDY: {direct_response}\n")
+                            await pipeline.speak(direct_response)
+                        else:
+                            # Conversational AI turn
+                            response = await conv_manager.process_user_turn(user_cmd, voice_response=True)
+                            print(f"BUDDY: {response.content}\n")
                     else:
-                        # Conversational AI turn
-                        response = await conv_manager.process_user_turn(user_cmd, voice_response=True)
-                        print(f"BUDDY: {response.content}\n")
-                else:
-                    print("(No speech recognized. Returning to standby.)\n")
+                        # Report fine-grained diagnostic category A-F
+                        outcome = listen_res.outcome.value
+                        err_detail = listen_res.error_message or "none"
+                        d = listen_res.diagnostics
+                        print(f"[{outcome}] chunks={d.chunks_received}, dur={d.window_seconds:.1f}s, peak_rms={d.peak_rms:.1f}, reason={err_detail}")
+                        print("(Returning to standby.)\n")
 
-        except asyncio.CancelledError:
-            break
-        except (KeyboardInterrupt, SystemExit):
-            print("\nShutting down voice assistant...")
-            break
-        except Exception as err:
-            print(f"Encountered error: {err}")
-            await asyncio.sleep(0.5)
+            except asyncio.CancelledError:
+                break
+            except (KeyboardInterrupt, SystemExit):
+                print("\nShutting down voice assistant...")
+                break
+            except Exception as err:
+                print(f"Encountered error: {err}")
+                await asyncio.sleep(0.5)
+    finally:
+        await capture.close()
 
 
 def main() -> None:

@@ -24,7 +24,12 @@ from app.voice.events import (
 from app.voice.exceptions import (
     AudioCaptureError,
     AudioDeviceError,
+    NoAudioFramesError,
+    STTEmptyError,
     STTError,
+    STTServiceError,
+    STTTimeoutError,
+    STTUnclearError,
     TTSError,
     VADError,
     VoiceError,
@@ -33,8 +38,12 @@ from app.voice.exceptions import (
 from app.voice.models import (
     AudioData,
     AudioDevice,
+    CaptureDiagnostics,
+    ListenResult,
     STTResult,
+    TranscriptionStatus,
     VADState,
+    VoiceOutcome,
 )
 from app.voice.pipeline import VoicePipeline
 from app.voice.stt import (
@@ -64,6 +73,10 @@ __all__ = [
     "AudioDevice",
     "STTResult",
     "VADState",
+    "TranscriptionStatus",
+    "VoiceOutcome",
+    "CaptureDiagnostics",
+    "ListenResult",
     # Events
     "VoiceListeningStartedEvent",
     "VoiceListeningStoppedEvent",
@@ -77,8 +90,13 @@ __all__ = [
     "VoiceError",
     "AudioDeviceError",
     "AudioCaptureError",
+    "NoAudioFramesError",
     "VADError",
     "STTError",
+    "STTEmptyError",
+    "STTUnclearError",
+    "STTServiceError",
+    "STTTimeoutError",
     "TTSError",
     "WakeWordError",
     # Device

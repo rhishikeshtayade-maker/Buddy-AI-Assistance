@@ -35,6 +35,26 @@ class STTError(VoiceError):
     """Raised when Speech-to-Text transcription fails or times out."""
 
 
+class STTEmptyError(STTError):
+    """Raised when the STT provider returns an empty transcript or audio is too short."""
+
+
+class STTUnclearError(STTError):
+    """Raised when speech was present but unintelligible to the STT provider."""
+
+
+class STTServiceError(STTError):
+    """Raised when the STT backend/network is unavailable or rejects the request."""
+
+
+class STTTimeoutError(STTError):
+    """Raised when STT recognition exceeds its bounded timeout."""
+
+
+class NoAudioFramesError(AudioCaptureError):
+    """Raised when the microphone stream opened but delivered no audio frames."""
+
+
 class TTSError(VoiceError):
     """Raised when Text-to-Speech synthesis or audio playback fails."""
 
