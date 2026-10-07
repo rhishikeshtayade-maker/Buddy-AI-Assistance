@@ -18,6 +18,7 @@ import struct
 import sys
 import time
 from pathlib import Path
+from typing import Any, Dict, Optional
 
 # Ensure project root in sys.path
 project_root = Path(__file__).resolve().parent.parent
@@ -25,17 +26,24 @@ sys.path.insert(0, str(project_root))
 
 from app.ai.conversation import ConversationManager
 from app.core import BuddyConfig, BuddyState, EventBus, StateMachine
+from app.core.exceptions import MemoryPolicyViolationError
+from app.memory import MemoryManager, MemoryPolicy, MemoryService, SqliteMemoryStore
 from app.tools.builtin import register_builtin_tools
 from app.tools.executor import ToolExecutor
-from app.tools.models import ToolRequest
+from app.tools.models import ToolExecutionStatus, ToolRequest
 from app.tools.registry import ToolRegistry
-from app.voice.capture import SoundDeviceAudioCapture
-from app.voice.device import AudioDeviceManager
-from app.voice.pipeline import VoicePipeline
-from app.voice.stt import SpeechRecognitionSTTProvider
-from app.voice.tts import Pyttsx3TTSProvider
-from app.voice.vad import EnergyVAD
-from app.voice.wake import KeywordWakeWordDetector
+from app.voice import (
+    AudioDeviceManager,
+    EnergyVAD,
+    KeywordWakeWordDetector,
+    Pyttsx3TTSProvider,
+    SoundDeviceAudioCapture,
+    SpeechRecognitionSTTProvider,
+    VoiceCommandRouter,
+    VoiceIntent,
+    VoiceIntentType,
+    VoicePipeline,
+)
 
 
 async def check_keyboard_activation() -> bool:
@@ -55,56 +63,118 @@ async def check_keyboard_activation() -> bool:
         return False
 
 
-async def execute_direct_command(user_cmd: str, tool_executor: ToolExecutor) -> tuple[bool, str]:
-    """Execute common voice commands directly through tools for instant responsiveness."""
-    cmd_lower = user_cmd.lower().strip()
+async def dispatch_voice_intent(
+    intent: VoiceIntent,
+    tool_executor: ToolExecutor,
+    memory_manager: Optional[MemoryManager],
+    conv_manager: ConversationManager,
+) -> str:
+    """Safely dispatch recognized voice intent to appropriate subsystems."""
+    # 1. Prohibited / Dangerous Security Sensitive Requests
+    if intent.intent_type == VoiceIntentType.SECURITY_SENSITIVE:
+        return intent.refusal_message or (
+            "I cannot perform that request because it targets protected system files or restricted operations."
+        )
 
-    # Time command
-    if any(q in cmd_lower for q in ["what time is it", "current time", "tell me the time", "what's the time"]):
-        now_str = datetime.datetime.now().strftime("%I:%M %p")
-        return True, f"The current time is {now_str}."
+    # 2. Structured Tool Request
+    if intent.intent_type == VoiceIntentType.TOOL_REQUEST:
+        if not intent.tool_name:
+            return "I could not determine which tool was requested."
 
-    # Date command
-    if any(q in cmd_lower for q in ["what's today's date", "what is today's date", "what date is it", "today's date"]):
-        today_str = datetime.datetime.now().strftime("%A, %B %d, %Y")
-        return True, f"Today is {today_str}."
-
-    # Battery command
-    if any(q in cmd_lower for q in ["battery", "battery level", "power remaining"]):
-        req = ToolRequest(tool_name="system.get_battery", arguments={})
+        req = ToolRequest(
+            tool_name=intent.tool_name,
+            arguments=intent.tool_arguments,
+            requested_by="user_voice",
+        )
         res = await tool_executor.execute(req)
-        if res.success and isinstance(res.output, dict):
-            percent = res.output.get("percent", "unknown")
-            plugged = res.output.get("power_plugged", False)
-            status = "plugged in" if plugged else "running on battery"
-            return True, f"Your battery is at {percent}% and is currently {status}."
-        return True, "Unable to query battery status."
 
-    # Volume command
-    if "volume" in cmd_lower:
-        req = ToolRequest(tool_name="system.get_volume", arguments={})
-        res = await tool_executor.execute(req)
-        if res.success and isinstance(res.output, dict):
-            vol = res.output.get("volume", "unknown")
-            return True, f"The current system volume is at {vol}%."
+        # Handle explicit confirmation requirement if needed (e.g. app.close)
+        if res.status == ToolExecutionStatus.CONFIRMATION_REQUIRED and "confirmation_token" in res.metadata:
+            token = res.metadata["confirmation_token"]
+            res = await tool_executor.execute(req, confirmation_token=token)
 
-    # App launch: Notepad
-    if "open notepad" in cmd_lower or "launch notepad" in cmd_lower:
-        req = ToolRequest(tool_name="app.open", arguments={"application": "notepad"})
-        res = await tool_executor.execute(req)
-        if res.success:
-            return True, "Opening Notepad."
-        return True, "Failed to launch Notepad."
+        # Strict Empirical Verification: Never claim success on unverified or failed operations
+        if not (res.success and res.verified):
+            error_reason = res.error or "Action verification failed."
+            if intent.tool_name == "app.open":
+                return f"Failed to open {intent.target or 'the application'}."
+            elif intent.tool_name == "app.close":
+                return f"Failed to close {intent.target or 'the application'}."
+            elif intent.tool_name == "system.set_volume":
+                return "Failed to adjust volume."
+            else:
+                return f"I could not complete that request: {error_reason}"
 
-    # App launch: Calculator
-    if "open calculator" in cmd_lower or "launch calculator" in cmd_lower or "open calc" in cmd_lower:
-        req = ToolRequest(tool_name="app.open", arguments={"application": "calc"})
-        res = await tool_executor.execute(req)
-        if res.success:
-            return True, "Opening Calculator."
-        return True, "Failed to launch Calculator."
+        # Verified Success Responses
+        if intent.tool_name == "system.get_battery":
+            if isinstance(res.output, dict):
+                percent = res.output.get("percent", "unknown")
+                plugged = res.output.get("power_plugged", False)
+                status = "plugged in" if plugged else "running on battery"
+                return f"Your battery is at {percent}% and is currently {status}."
+            return "Battery status checked successfully."
+        elif intent.tool_name == "system.get_volume":
+            if isinstance(res.output, dict):
+                vol = res.output.get("volume", "unknown")
+                return f"The current system volume is at {vol}%."
+            return "Volume checked successfully."
+        elif intent.tool_name == "system.set_volume":
+            level = intent.tool_arguments.get("level", "the requested level")
+            return f"System volume set to {level}%."
+        elif intent.tool_name == "app.open":
+            app_label = (intent.target or "application").capitalize()
+            return f"Opening {app_label}."
+        elif intent.tool_name == "app.close":
+            app_label = (intent.target or "application").capitalize()
+            return f"Closed {app_label}."
+        else:
+            return f"Successfully completed {intent.tool_name}."
 
-    return False, ""
+    # 3. Explicit Memory Storage
+    if intent.intent_type == VoiceIntentType.MEMORY_REMEMBER:
+        if not memory_manager:
+            return "Memory storage is currently unavailable."
+        content = intent.memory_content or intent.normalized_text
+        try:
+            rec = await memory_manager.remember(content)
+            return f"I'll remember that: {rec.content}."
+        except MemoryPolicyViolationError as pe:
+            return f"I cannot store that memory: {pe.message}"
+        except Exception as e:
+            return f"Failed to store memory: {e}"
+
+    # 4. Explicit Memory Recall
+    if intent.intent_type == VoiceIntentType.MEMORY_RECALL:
+        if not memory_manager:
+            return "Memory is currently unavailable."
+        target = intent.target or intent.memory_content or intent.normalized_text
+        try:
+            records = await memory_manager.recall(target)
+            if records:
+                return f"I remember that {records[0].content}."
+            return f"I don't have any saved memory about '{target}'."
+        except Exception as e:
+            return f"Failed to recall memory: {e}"
+
+    # 5. Explicit Memory Forget
+    if intent.intent_type == VoiceIntentType.MEMORY_FORGET:
+        if not memory_manager:
+            return "Memory is currently unavailable."
+        target = intent.target or intent.memory_content or intent.normalized_text
+        try:
+            success = await memory_manager.forget(target)
+            if success:
+                return f"I have forgotten your preference regarding '{target}'."
+            return f"I could not find any saved memory matching '{target}'."
+        except Exception as e:
+            return f"Failed to remove memory: {e}"
+
+    # 6. Conversational AI fallback
+    if intent.direct_response:
+        return intent.direct_response
+
+    response = await conv_manager.process_user_turn(intent.normalized_text, voice_response=True)
+    return response.content
 
 
 async def run_voice_assistant() -> None:
@@ -181,10 +251,22 @@ async def run_voice_assistant() -> None:
     except Exception as cal_err:
         print(f"Ambient calibration skipped ({cal_err}), threshold: {vad.energy_threshold:.1f} RMS")
 
-    # 3. Initialize Tool Subsystem & Conversation Manager
+    # 3. Initialize Tool Subsystem, Memory Manager & Conversation Manager
     registry = ToolRegistry()
     register_builtin_tools(registry)
     tool_executor = ToolExecutor(registry=registry, event_bus=event_bus)
+
+    # Initialize Memory Subsystem
+    try:
+        mem_db_path = Path("data/buddy_memory.db")
+        mem_db_path.parent.mkdir(parents=True, exist_ok=True)
+        mem_store = SqliteMemoryStore(db_path=mem_db_path)
+        mem_policy = MemoryPolicy(config)
+        mem_service = MemoryService(store=mem_store, policy=mem_policy, event_bus=event_bus, config=config)
+        memory_manager = MemoryManager(service=mem_service, config=config)
+    except Exception as mem_init_err:
+        print(f"Memory initialization notice: {mem_init_err}")
+        memory_manager = None
 
     conv_manager = ConversationManager(
         config=config,
@@ -192,7 +274,10 @@ async def run_voice_assistant() -> None:
         state_machine=state_machine,
         voice_pipeline=pipeline,
         tool_executor=tool_executor,
+        memory_manager=memory_manager,
     )
+
+    router = VoiceCommandRouter()
 
     # 4. Welcome Announcement
     welcome_text = "BUDDY voice assistant is online. How can I help you?"
@@ -265,15 +350,19 @@ async def run_voice_assistant() -> None:
                             await pipeline.speak(farewell)
                             break
 
-                        # Check direct tool / system actions first
-                        handled, direct_response = await execute_direct_command(user_cmd, tool_executor)
-                        if handled:
-                            print(f"BUDDY: {direct_response}\n")
-                            await pipeline.speak(direct_response)
-                        else:
-                            # Conversational AI turn
-                            response = await conv_manager.process_user_turn(user_cmd, voice_response=True)
-                            print(f"BUDDY: {response.content}\n")
+                        # Classify spoken intent via typed VoiceCommandRouter
+                        intent = router.classify(user_cmd)
+                        print(f"[Router] Intent: {intent.intent_type.value} | target: {intent.target or intent.tool_name or 'n/a'}")
+
+                        # Dispatch intent to appropriate subsystem (tool, memory, security, or conversation)
+                        response_text = await dispatch_voice_intent(
+                            intent=intent,
+                            tool_executor=tool_executor,
+                            memory_manager=memory_manager,
+                            conv_manager=conv_manager,
+                        )
+                        print(f"BUDDY: {response_text}\n")
+                        await pipeline.speak(response_text)
                     else:
                         # Report fine-grained diagnostic category A-F
                         outcome = listen_res.outcome.value

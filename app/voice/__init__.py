@@ -10,6 +10,11 @@ from app.voice.capture import (
     MockAudioCapture,
     SoundDeviceAudioCapture,
 )
+from app.voice.command_router import (
+    VoiceCommandRouter,
+    VoiceIntent,
+    VoiceIntentType,
+)
 from app.voice.device import AudioDeviceManager
 from app.voice.events import (
     SpeechStartedEvent,
@@ -123,4 +128,8 @@ __all__ = [
     "KeywordWakeWordDetector",
     # Pipeline
     "VoicePipeline",
+    # Command Router
+    "VoiceCommandRouter",
+    "VoiceIntent",
+    "VoiceIntentType",
 ]
