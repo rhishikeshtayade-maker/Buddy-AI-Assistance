@@ -41,12 +41,14 @@ VALID_TRANSITIONS: Dict[BuddyState, Set[BuddyState]] = {
     },
     BuddyState.LISTENING: {
         BuddyState.THINKING,
+        BuddyState.IDLE,
         BuddyState.ERROR,
         BuddyState.SHUTTING_DOWN,
     },
     BuddyState.THINKING: {
         BuddyState.EXECUTING,
         BuddyState.SPEAKING,
+        BuddyState.IDLE,
         BuddyState.ERROR,
         BuddyState.SHUTTING_DOWN,
     },

@@ -63,11 +63,29 @@ async def check_keyboard_activation() -> bool:
         return False
 
 
+def _recover_state_to_idle(state_machine: StateMachine, reason: str = "Turn cycle recovery") -> None:
+    """Ensure state machine returns safely to IDLE without leaving runtime stuck."""
+    current = state_machine.current_state
+    if current == BuddyState.IDLE:
+        return
+    if state_machine.can_transition_to(BuddyState.IDLE):
+        state_machine.transition_to(BuddyState.IDLE, reason=reason)
+    elif state_machine.can_transition_to(BuddyState.SPEAKING):
+        state_machine.transition_to(BuddyState.SPEAKING, reason=reason)
+        if state_machine.can_transition_to(BuddyState.IDLE):
+            state_machine.transition_to(BuddyState.IDLE, reason="Recovery from speaking")
+    elif state_machine.can_transition_to(BuddyState.ERROR):
+        state_machine.transition_to(BuddyState.ERROR, reason=reason)
+        if state_machine.can_transition_to(BuddyState.IDLE):
+            state_machine.transition_to(BuddyState.IDLE, reason="Recovery from error")
+
+
 async def dispatch_voice_intent(
     intent: VoiceIntent,
     tool_executor: ToolExecutor,
     memory_manager: Optional[MemoryManager],
     conv_manager: ConversationManager,
+    state_machine: Optional[StateMachine] = None,
 ) -> str:
     """Safely dispatch recognized voice intent to appropriate subsystems."""
     # 1. Prohibited / Dangerous Security Sensitive Requests
@@ -81,54 +99,64 @@ async def dispatch_voice_intent(
         if not intent.tool_name:
             return "I could not determine which tool was requested."
 
-        req = ToolRequest(
-            tool_name=intent.tool_name,
-            arguments=intent.tool_arguments,
-            requested_by="user_voice",
-        )
-        res = await tool_executor.execute(req)
+        if state_machine and state_machine.can_transition_to(BuddyState.EXECUTING):
+            state_machine.transition_to(
+                BuddyState.EXECUTING,
+                reason=f"Executing tool: {intent.tool_name}",
+            )
+        try:
+            req = ToolRequest(
+                tool_name=intent.tool_name,
+                arguments=intent.tool_arguments,
+                requested_by="user_voice",
+            )
+            res = await tool_executor.execute(req)
 
-        # Handle explicit confirmation requirement if needed (e.g. app.close)
-        if res.status == ToolExecutionStatus.CONFIRMATION_REQUIRED and "confirmation_token" in res.metadata:
-            token = res.metadata["confirmation_token"]
-            res = await tool_executor.execute(req, confirmation_token=token)
+            # Handle explicit confirmation requirement if needed (e.g. app.close)
+            if res.status == ToolExecutionStatus.CONFIRMATION_REQUIRED and "confirmation_token" in res.metadata:
+                token = res.metadata["confirmation_token"]
+                res = await tool_executor.execute(req, confirmation_token=token)
 
-        # Strict Empirical Verification: Never claim success on unverified or failed operations
-        if not (res.success and res.verified):
-            error_reason = res.error or "Action verification failed."
-            if intent.tool_name == "app.open":
-                return f"Failed to open {intent.target or 'the application'}."
-            elif intent.tool_name == "app.close":
-                return f"Failed to close {intent.target or 'the application'}."
+            # Strict Empirical Verification: Never claim success on unverified or failed operations
+            if not (res.success and res.verified):
+                error_reason = res.error or "Action verification failed."
+                if intent.tool_name == "app.open":
+                    return f"Failed to open {intent.target or 'the application'}."
+                elif intent.tool_name == "app.close":
+                    return f"Failed to close {intent.target or 'the application'}."
+                elif intent.tool_name == "system.set_volume":
+                    return "Failed to adjust volume."
+                else:
+                    return f"I could not complete that request: {error_reason}"
+
+            # Verified Success Responses
+            if intent.tool_name == "system.get_battery":
+                if isinstance(res.output, dict):
+                    percent = res.output.get("percent", "unknown")
+                    plugged = res.output.get("power_plugged", False)
+                    status = "plugged in" if plugged else "running on battery"
+                    return f"Your battery is at {percent}% and is currently {status}."
+                return "Battery status checked successfully."
+            elif intent.tool_name == "system.get_volume":
+                if isinstance(res.output, dict):
+                    vol = res.output.get("volume", "unknown")
+                    return f"The current system volume is at {vol}%."
+                return "Volume checked successfully."
             elif intent.tool_name == "system.set_volume":
-                return "Failed to adjust volume."
+                level = intent.tool_arguments.get("level", "the requested level")
+                return f"System volume set to {level}%."
+            elif intent.tool_name == "app.open":
+                app_label = (intent.target or "application").capitalize()
+                return f"Opening {app_label}."
+            elif intent.tool_name == "app.close":
+                app_label = (intent.target or "application").capitalize()
+                return f"Closed {app_label}."
             else:
-                return f"I could not complete that request: {error_reason}"
-
-        # Verified Success Responses
-        if intent.tool_name == "system.get_battery":
-            if isinstance(res.output, dict):
-                percent = res.output.get("percent", "unknown")
-                plugged = res.output.get("power_plugged", False)
-                status = "plugged in" if plugged else "running on battery"
-                return f"Your battery is at {percent}% and is currently {status}."
-            return "Battery status checked successfully."
-        elif intent.tool_name == "system.get_volume":
-            if isinstance(res.output, dict):
-                vol = res.output.get("volume", "unknown")
-                return f"The current system volume is at {vol}%."
-            return "Volume checked successfully."
-        elif intent.tool_name == "system.set_volume":
-            level = intent.tool_arguments.get("level", "the requested level")
-            return f"System volume set to {level}%."
-        elif intent.tool_name == "app.open":
-            app_label = (intent.target or "application").capitalize()
-            return f"Opening {app_label}."
-        elif intent.tool_name == "app.close":
-            app_label = (intent.target or "application").capitalize()
-            return f"Closed {app_label}."
-        else:
-            return f"Successfully completed {intent.tool_name}."
+                return f"Successfully completed {intent.tool_name}."
+        finally:
+            if state_machine and state_machine.current_state == BuddyState.EXECUTING:
+                if state_machine.can_transition_to(BuddyState.THINKING):
+                    state_machine.transition_to(BuddyState.THINKING, reason="Tool execution finished")
 
     # 3. Explicit Memory Storage
     if intent.intent_type == VoiceIntentType.MEMORY_REMEMBER:
@@ -173,7 +201,7 @@ async def dispatch_voice_intent(
     if intent.direct_response:
         return intent.direct_response
 
-    response = await conv_manager.process_user_turn(intent.normalized_text, voice_response=True)
+    response = await conv_manager.process_user_turn(intent.normalized_text, voice_response=False)
     return response.content
 
 
@@ -275,6 +303,7 @@ async def run_voice_assistant() -> None:
         voice_pipeline=pipeline,
         tool_executor=tool_executor,
         memory_manager=memory_manager,
+        auto_subscribe_voice=False,
     )
 
     router = VoiceCommandRouter()
@@ -330,46 +359,52 @@ async def run_voice_assistant() -> None:
                         pass
 
                 if activated:
-                    # Audible prompt
                     try:
-                        await pipeline.speak("I'm listening.")
-                    except Exception:
-                        pass
+                        # Audible prompt
+                        try:
+                            await pipeline.speak("I'm listening.")
+                        except Exception:
+                            pass
 
-                    print(">>> LISTENING FOR YOUR COMMAND (speak now)... <<<")
-                    listen_res = await pipeline.listen_with_diagnostics(timeout=7.0)
+                        print(">>> LISTENING FOR YOUR COMMAND (speak now)... <<<")
+                        listen_res = await pipeline.listen_with_diagnostics(timeout=7.0)
 
-                    if listen_res.ok and listen_res.transcript:
-                        user_cmd = listen_res.transcript.strip()
-                        print(f"\nYou said: \"{user_cmd}\" (latency: capture={listen_res.capture_latency:.2f}s, stt={listen_res.stt_latency:.2f}s)")
+                        if listen_res.ok and listen_res.transcript:
+                            user_cmd = listen_res.transcript.strip()
+                            print(f"\nYou said: \"{user_cmd}\" (latency: capture={listen_res.capture_latency:.2f}s, stt={listen_res.stt_latency:.2f}s)")
 
-                        # Check exit commands
-                        if user_cmd.lower() in ("exit", "quit", "goodbye", "bye", "shutdown"):
-                            farewell = "Goodbye! Have a great day."
-                            print(f"BUDDY: {farewell}")
-                            await pipeline.speak(farewell)
-                            break
+                            # Check exit commands
+                            if user_cmd.lower() in ("exit", "quit", "goodbye", "bye", "shutdown"):
+                                farewell = "Goodbye! Have a great day."
+                                print(f"BUDDY: {farewell}")
+                                await pipeline.speak(farewell)
+                                break
 
-                        # Classify spoken intent via typed VoiceCommandRouter
-                        intent = router.classify(user_cmd)
-                        print(f"[Router] Intent: {intent.intent_type.value} | target: {intent.target or intent.tool_name or 'n/a'}")
+                            # Classify spoken intent via typed VoiceCommandRouter
+                            intent = router.classify(user_cmd)
+                            print(f"[Router] Intent: {intent.intent_type.value} | target: {intent.target or intent.tool_name or 'n/a'}")
 
-                        # Dispatch intent to appropriate subsystem (tool, memory, security, or conversation)
-                        response_text = await dispatch_voice_intent(
-                            intent=intent,
-                            tool_executor=tool_executor,
-                            memory_manager=memory_manager,
-                            conv_manager=conv_manager,
-                        )
-                        print(f"BUDDY: {response_text}\n")
-                        await pipeline.speak(response_text)
-                    else:
-                        # Report fine-grained diagnostic category A-F
-                        outcome = listen_res.outcome.value
-                        err_detail = listen_res.error_message or "none"
-                        d = listen_res.diagnostics
-                        print(f"[{outcome}] chunks={d.chunks_received}, dur={d.window_seconds:.1f}s, peak_rms={d.peak_rms:.1f}, reason={err_detail}")
-                        print("(Returning to standby.)\n")
+                            # Dispatch intent to appropriate subsystem (tool, memory, security, or conversation)
+                            response_text = await dispatch_voice_intent(
+                                intent=intent,
+                                tool_executor=tool_executor,
+                                memory_manager=memory_manager,
+                                conv_manager=conv_manager,
+                                state_machine=state_machine,
+                            )
+                            print(f"BUDDY: {response_text}\n")
+                            await pipeline.speak(response_text)
+                        else:
+                            # Report fine-grained diagnostic category A-F
+                            outcome = listen_res.outcome.value
+                            err_detail = listen_res.error_message or "none"
+                            d = listen_res.diagnostics
+                            print(f"[{outcome}] chunks={d.chunks_received}, dur={d.window_seconds:.1f}s, peak_rms={d.peak_rms:.1f}, reason={err_detail}")
+                            print("(Returning to standby.)\n")
+                    finally:
+                        # Invariant: Assistant must return to IDLE before the next wake-word / listening cycle
+                        if state_machine.current_state != BuddyState.IDLE:
+                            _recover_state_to_idle(state_machine, "Turn finalized")
 
             except asyncio.CancelledError:
                 break

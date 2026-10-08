@@ -205,6 +205,7 @@ class VoicePipeline:
                     "Cannot start listening from state %s",
                     self._state_machine.current_state.value,
                 )
+                self._recover_to_idle(f"Recovery from invalid start state: {self._state_machine.current_state.value}")
                 return ListenResult(
                     outcome=VoiceOutcome.ROUTING_FAILED,
                     error_message=f"Invalid start state: {self._state_machine.current_state.value}",
@@ -261,11 +262,11 @@ class VoicePipeline:
                     chunks_received += 1
                     bytes_received += len(chunk)
 
+                    vad_state = self._vad.process_chunk(chunk)
                     chunk_rms = getattr(self._vad, "last_rms", 0.0) or EnergyVAD.calculate_chunk_rms(chunk)
                     peak_rms = max(peak_rms, chunk_rms)
                     sum_rms += chunk_rms
 
-                    vad_state = self._vad.process_chunk(chunk)
                     if vad_state == VADState.COMPLETED:
                         break
 
@@ -422,7 +423,17 @@ class VoicePipeline:
         """Voicing response through Text-to-Speech provider with lifecycle events."""
         if not text or not text.strip():
             logger.debug("Empty text passed to speak(); skipping.")
+            if self._state_machine.current_state in (BuddyState.THINKING, BuddyState.EXECUTING):
+                self._recover_to_idle("Speech skipped for empty text")
             return
+
+        should_return_to_idle = False
+        if self._state_machine.current_state in (BuddyState.THINKING, BuddyState.EXECUTING):
+            if self._state_machine.can_transition_to(BuddyState.SPEAKING):
+                self._state_machine.transition_to(BuddyState.SPEAKING, reason="Voicing speech response")
+                should_return_to_idle = True
+        elif self._state_machine.current_state == BuddyState.SPEAKING:
+            should_return_to_idle = True
 
         await self._event_bus.publish(SpeechStartedEvent(text=text))
 
@@ -438,6 +449,10 @@ class VoicePipeline:
                     message=str(err),
                 )
             )
+            raise
+        finally:
+            if should_return_to_idle and self._state_machine.current_state == BuddyState.SPEAKING:
+                self._recover_to_idle("Speech playback completed")
 
     async def stop_speaking(self) -> None:
         """Interrupt and halt any active speech synthesis."""

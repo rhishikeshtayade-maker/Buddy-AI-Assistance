@@ -51,6 +51,7 @@ class ConversationManager:
         system_prompt: str = BUDDY_SYSTEM_PROMPT,
         session_id: Optional[str] = None,
         memory_manager: Optional[Any] = None,
+        auto_subscribe_voice: bool = True,
     ) -> None:
         self._config = config
         self._event_bus = event_bus
@@ -83,11 +84,12 @@ class ConversationManager:
         self.last_ai_latency: float = 0.0
         self.last_total_turn_latency: float = 0.0
 
-        # Subscribe to VoiceCommandReceivedEvent if voice pipeline is wired
-        self._event_bus.subscribe(
-            __import__("app.voice").voice.VoiceCommandReceivedEvent,
-            self._on_voice_command_received,
-        )
+        # Subscribe to VoiceCommandReceivedEvent if voice pipeline is wired and auto-subscription is requested
+        if auto_subscribe_voice:
+            self._event_bus.subscribe(
+                __import__("app.voice").voice.VoiceCommandReceivedEvent,
+                self._on_voice_command_received,
+            )
 
     @property
     def tool_executor(self) -> Optional[ToolExecutor]:
@@ -224,8 +226,17 @@ class ConversationManager:
                     self._history.append(ChatMessage(role=MessageRole.USER, content=user_text, source=source))
                     self._history.append(ChatMessage(role=MessageRole.ASSISTANT, content=resp_content, source=ContentSource.INTERNAL))
                     self._truncate_history_if_needed()
-                    if self._state_machine.can_transition_to(BuddyState.IDLE):
-                        self._state_machine.transition_to(BuddyState.IDLE, reason="Memory command handled")
+                    if voice_response and self._voice_pipeline is not None:
+                        if self._state_machine.can_transition_to(BuddyState.SPEAKING):
+                            self._state_machine.transition_to(BuddyState.SPEAKING, reason="Voicing memory response")
+                        try:
+                            await self._voice_pipeline.speak(resp_content)
+                        finally:
+                            if self._state_machine.can_transition_to(BuddyState.IDLE):
+                                self._state_machine.transition_to(BuddyState.IDLE, reason="Memory turn complete")
+                    else:
+                        if self._state_machine.can_transition_to(BuddyState.IDLE):
+                            self._state_machine.transition_to(BuddyState.IDLE, reason="Memory command handled")
                     return response
 
             if not self._history:
