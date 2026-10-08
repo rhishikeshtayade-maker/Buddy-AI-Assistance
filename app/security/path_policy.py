@@ -83,7 +83,11 @@ class PathPolicy:
                 resolved = Path(r).resolve()
                 self._allowed_roots.append(resolved)
         else:
-            home = Path.home().resolve()
+            try:
+                home = Path.home().resolve()
+            except RuntimeError:
+                userprofile = os.environ.get("USERPROFILE") or os.environ.get("HOME")
+                home = Path(userprofile).resolve() if userprofile else Path.cwd().resolve()
             default_roots = [
                 home / "Documents",
                 home / "Downloads",
