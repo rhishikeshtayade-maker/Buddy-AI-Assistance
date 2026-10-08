@@ -13,7 +13,9 @@ import time
 import wave
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Optional
+from typing import Any, Dict, Optional
+
+from pydantic import BaseModel, Field
 
 
 class VADState(str, Enum):
@@ -168,6 +170,51 @@ class CaptureDiagnostics:
     error: Optional[str] = None
 
 
+
+class VoiceLatencyMetrics(BaseModel):
+    """Fine-grained monotonic latency metrics for an end-to-end voice turn (all in milliseconds).
+
+    Strict privacy & security invariant:
+      Contains ONLY numeric timing measurements and safe structural metadata.
+      Never contains raw audio samples, transcripts, API keys, passwords, or secrets.
+    """
+
+    wake_detection_ms: Optional[float] = None
+    capture_start_ms: Optional[float] = None
+    capture_end_ms: Optional[float] = None
+    stt_start_ms: Optional[float] = None
+    first_transcript_ms: Optional[float] = None
+    stt_complete_ms: Optional[float] = None
+    routing_start_ms: Optional[float] = None
+    routing_complete_ms: Optional[float] = None
+    tool_start_ms: Optional[float] = None
+    tool_complete_ms: Optional[float] = None
+    ai_start_ms: Optional[float] = None
+    first_ai_token_ms: Optional[float] = None
+    ai_complete_ms: Optional[float] = None
+    tts_start_ms: Optional[float] = None
+    first_audio_output_ms: Optional[float] = None
+    tts_complete_ms: Optional[float] = None
+    barge_in_latency_ms: Optional[float] = None
+    total_turn_ms: Optional[float] = None
+
+    # Safe metadata
+    intent_type: Optional[str] = None
+    stt_provider: Optional[str] = None
+    ai_provider: Optional[str] = None
+    tts_provider: Optional[str] = None
+    barge_in_triggered: bool = False
+    success: bool = True
+
+    model_config = {
+        "extra": "forbid",
+    }
+
+    def to_safe_dict(self) -> Dict[str, Any]:
+        """Return metadata and numeric timings dict guaranteed free of sensitive content."""
+        return {k: v for k, v in self.model_dump().items() if v is not None}
+
+
 @dataclass
 class ListenResult:
     """Result of a categorized listen attempt (capture -> VAD -> STT)."""
@@ -176,6 +223,7 @@ class ListenResult:
     transcription_status: TranscriptionStatus = TranscriptionStatus.NOT_ATTEMPTED
     stt_result: Optional[STTResult] = None
     diagnostics: CaptureDiagnostics = field(default_factory=CaptureDiagnostics)
+    latency_metrics: Optional[VoiceLatencyMetrics] = None
     error_message: Optional[str] = None
     capture_latency: float = 0.0
     stt_latency: float = 0.0
@@ -188,3 +236,4 @@ class ListenResult:
     @property
     def ok(self) -> bool:
         return self.outcome == VoiceOutcome.TRANSCRIBED and bool(self.transcript.strip())
+

@@ -162,6 +162,23 @@ class BuddyConfig(BaseSettings):
         default=False,
         validation_alias="LOG_TRANSCRIPTS",
     )
+    # Voice Performance & Streaming Settings (Loop 14)
+    voice_audio_chunk_ms: int = Field(
+        default=32,
+        validation_alias="VOICE_AUDIO_CHUNK_MS",
+    )
+    voice_audio_queue_size: int = Field(
+        default=256,
+        validation_alias="VOICE_AUDIO_QUEUE_SIZE",
+    )
+    voice_barge_in_enabled: bool = Field(
+        default=True,
+        validation_alias="VOICE_BARGE_IN_ENABLED",
+    )
+    voice_streaming_enabled: bool = Field(
+        default=True,
+        validation_alias="VOICE_STREAMING_ENABLED",
+    )
 
     # Memory & Contextual Personalization Settings (Loop 8)
     memory_enabled: bool = Field(

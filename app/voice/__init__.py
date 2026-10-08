@@ -20,10 +20,15 @@ from app.voice.events import (
     SpeechStartedEvent,
     SpeechStoppedEvent,
     SpeechSynthesisFailedEvent,
+    VoiceBargeInDetectedEvent,
     VoiceCommandReceivedEvent,
+    VoiceLatencyRecordedEvent,
     VoiceListeningStartedEvent,
     VoiceListeningStoppedEvent,
+    VoicePartialTranscriptEvent,
     VoiceRecognitionFailedEvent,
+    VoiceSpeechDetectedEvent,
+    VoiceSpeechEndedEvent,
     WakeWordDetectedEvent,
 )
 from app.voice.exceptions import (
@@ -48,13 +53,18 @@ from app.voice.models import (
     STTResult,
     TranscriptionStatus,
     VADState,
+    VoiceLatencyMetrics,
     VoiceOutcome,
 )
 from app.voice.pipeline import VoicePipeline
 from app.voice.stt import (
+    BatchFallbackStreamingSession,
     MockSTTProvider,
+    MockStreamingSTTProvider,
     SpeechRecognitionSTTProvider,
     SpeechToTextProvider,
+    StreamingSTTProvider,
+    StreamingSTTSession,
 )
 from app.voice.tts import (
     MockTTSProvider,
@@ -68,6 +78,7 @@ from app.voice.vad import (
 )
 from app.voice.wake import (
     KeywordWakeWordDetector,
+    LocalWakeWordDetector,
     MockWakeWordDetector,
     WakeWordDetector,
 )
@@ -82,6 +93,7 @@ __all__ = [
     "VoiceOutcome",
     "CaptureDiagnostics",
     "ListenResult",
+    "VoiceLatencyMetrics",
     # Events
     "VoiceListeningStartedEvent",
     "VoiceListeningStoppedEvent",
@@ -91,6 +103,11 @@ __all__ = [
     "SpeechStoppedEvent",
     "SpeechSynthesisFailedEvent",
     "WakeWordDetectedEvent",
+    "VoiceBargeInDetectedEvent",
+    "VoicePartialTranscriptEvent",
+    "VoiceSpeechDetectedEvent",
+    "VoiceSpeechEndedEvent",
+    "VoiceLatencyRecordedEvent",
     # Exceptions
     "VoiceError",
     "AudioDeviceError",
@@ -116,7 +133,11 @@ __all__ = [
     "MockVAD",
     # STT
     "SpeechToTextProvider",
+    "StreamingSTTProvider",
+    "StreamingSTTSession",
+    "BatchFallbackStreamingSession",
     "MockSTTProvider",
+    "MockStreamingSTTProvider",
     "SpeechRecognitionSTTProvider",
     # TTS
     "TextToSpeechProvider",
@@ -126,6 +147,7 @@ __all__ = [
     "WakeWordDetector",
     "MockWakeWordDetector",
     "KeywordWakeWordDetector",
+    "LocalWakeWordDetector",
     # Pipeline
     "VoicePipeline",
     # Command Router

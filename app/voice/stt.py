@@ -11,7 +11,7 @@ import io
 import logging
 import time
 from abc import ABC, abstractmethod
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 from app.voice.exceptions import (
     STTEmptyError,
@@ -25,6 +25,22 @@ from app.voice.models import AudioData, STTResult
 logger = logging.getLogger("buddy.voice.stt")
 
 
+class StreamingSTTSession(ABC):
+    """Active streaming session ingesting audio chunks incrementally."""
+
+    @abstractmethod
+    async def push_chunk(self, chunk: bytes) -> Optional[str]:
+        """Push a raw PCM chunk into the streaming session. Returns updated partial transcript if available."""
+
+    @abstractmethod
+    async def finish(self) -> STTResult:
+        """Finalize the streaming session and return the complete STTResult."""
+
+    @abstractmethod
+    async def cancel(self) -> None:
+        """Cancel the streaming session and discard resources."""
+
+
 class SpeechToTextProvider(ABC):
     """Abstract interface defining speech-to-text transcription."""
 
@@ -33,12 +49,169 @@ class SpeechToTextProvider(ABC):
     def provider_name(self) -> str:
         """Name of the STT provider."""
 
+    @property
+    def supports_streaming(self) -> bool:
+        """Return True if this provider supports real-time streaming audio ingestion."""
+        return False
+
     @abstractmethod
     async def transcribe(self, audio: AudioData, language: Optional[str] = "en") -> STTResult:
         """Transcribe an AudioData buffer into an STTResult.
 
         Raises STTError on failure or timeout.
         """
+
+    async def start_stream(
+        self,
+        language: Optional[str] = "en",
+        sample_rate: int = 16000,
+        on_partial: Optional[Callable[[str], Any]] = None,
+    ) -> StreamingSTTSession:
+        """Start a streaming session. Fallback default creates a BatchFallbackStreamingSession."""
+        return BatchFallbackStreamingSession(self, language=language, sample_rate=sample_rate, on_partial=on_partial)
+
+
+class BatchFallbackStreamingSession(StreamingSTTSession):
+    """Deterministic fallback session for non-streaming STT providers.
+
+    Accumulates chunks in memory and invokes batch transcribe() on finish().
+    """
+
+    def __init__(
+        self,
+        provider: SpeechToTextProvider,
+        language: Optional[str] = "en",
+        sample_rate: int = 16000,
+        on_partial: Optional[Callable[[str], Any]] = None,
+    ) -> None:
+        self._provider = provider
+        self._language = language
+        self._sample_rate = sample_rate
+        self._on_partial = on_partial
+        self._buffer = bytearray()
+        self._cancelled = False
+
+    async def push_chunk(self, chunk: bytes) -> Optional[str]:
+        if self._cancelled:
+            return None
+        self._buffer.extend(chunk)
+        return None
+
+    async def finish(self) -> STTResult:
+        if self._cancelled:
+            raise STTError("Streaming STT session was cancelled")
+        audio = AudioData(raw_data=bytes(self._buffer), sample_rate=self._sample_rate)
+        return await self._provider.transcribe(audio, language=self._language)
+
+    async def cancel(self) -> None:
+        self._cancelled = True
+        self._buffer.clear()
+
+
+class StreamingSTTProvider(SpeechToTextProvider):
+    """Abstract STT provider natively supporting streaming audio ingestion."""
+
+    @property
+    def supports_streaming(self) -> bool:
+        return True
+
+    @abstractmethod
+    async def start_stream(
+        self,
+        language: Optional[str] = "en",
+        sample_rate: int = 16000,
+        on_partial: Optional[Callable[[str], Any]] = None,
+    ) -> StreamingSTTSession:
+        """Start a native streaming session."""
+
+
+class MockStreamingSTTSession(StreamingSTTSession):
+    """Streaming session for MockStreamingSTTProvider."""
+
+    def __init__(
+        self,
+        final_transcript: str,
+        on_partial: Optional[Callable[[str], Any]] = None,
+        sample_rate: int = 16000,
+    ) -> None:
+        self._final_transcript = final_transcript
+        self._words = final_transcript.strip().split()
+        self._on_partial = on_partial
+        self._sample_rate = sample_rate
+        self._chunks_pushed = 0
+        self._buffer = bytearray()
+        self._cancelled = False
+        self._current_partial = ""
+
+    async def push_chunk(self, chunk: bytes) -> Optional[str]:
+        if self._cancelled:
+            return None
+        self._buffer.extend(chunk)
+        self._chunks_pushed += 1
+        if self._words:
+            word_idx = min(len(self._words), self._chunks_pushed)
+            self._current_partial = " ".join(self._words[:word_idx])
+            if self._on_partial:
+                res = self._on_partial(self._current_partial)
+                if asyncio.iscoroutine(res):
+                    await res
+            return self._current_partial
+        return None
+
+    async def finish(self) -> STTResult:
+        if self._cancelled:
+            raise STTError("Mock streaming session was cancelled")
+        duration = len(self._buffer) / (self._sample_rate * 2) if self._sample_rate > 0 else 0.0
+        return STTResult(
+            transcript=self._final_transcript,
+            confidence=0.99,
+            language="en",
+            duration=duration,
+            provider="mock_streaming",
+            timestamp=time.time(),
+        )
+
+    async def cancel(self) -> None:
+        self._cancelled = True
+        self._buffer.clear()
+
+
+class MockStreamingSTTProvider(StreamingSTTProvider):
+    """Deterministic mock streaming STT provider for unit testing."""
+
+    def __init__(self, default_transcript: str = "Hello BUDDY") -> None:
+        self.default_transcript = default_transcript
+        self.session_count = 0
+        self.last_session: Optional[MockStreamingSTTSession] = None
+
+    @property
+    def provider_name(self) -> str:
+        return "mock_streaming"
+
+    async def transcribe(self, audio: AudioData, language: Optional[str] = "en") -> STTResult:
+        return STTResult(
+            transcript=self.default_transcript,
+            confidence=0.99,
+            language=language or "en",
+            duration=audio.duration,
+            provider=self.provider_name,
+            timestamp=time.time(),
+        )
+
+    async def start_stream(
+        self,
+        language: Optional[str] = "en",
+        sample_rate: int = 16000,
+        on_partial: Optional[Callable[[str], Any]] = None,
+    ) -> StreamingSTTSession:
+        self.session_count += 1
+        session = MockStreamingSTTSession(
+            final_transcript=self.default_transcript,
+            on_partial=on_partial,
+            sample_rate=sample_rate,
+        )
+        self.last_session = session
+        return session
 
 
 class MockSTTProvider(SpeechToTextProvider):

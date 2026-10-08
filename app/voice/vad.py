@@ -35,6 +35,26 @@ class VoiceActivityDetectorInterface(ABC):
     def state(self) -> VADState:
         """Current state of voice activity."""
 
+    @property
+    def is_speech_started(self) -> bool:
+        """Return True on the chunk when speech onset occurs."""
+        return False
+
+    @property
+    def is_speech_active(self) -> bool:
+        """Return True while speech utterance is active (SPEAKING or brief SILENCE)."""
+        return self.state in (VADState.SPEAKING, VADState.SILENCE)
+
+    @property
+    def is_speech_ended(self) -> bool:
+        """Return True when an utterance has ended and completed."""
+        return self.state == VADState.COMPLETED
+
+    def process_chunk_event(self, chunk: bytes) -> tuple[VADState, str]:
+        """Process chunk and return (state, event_type)."""
+        state = self.process_chunk(chunk)
+        return state, getattr(self, "current_vad_event", "none")
+
 
 class EnergyVAD(VoiceActivityDetectorInterface):
     """Adaptive energy-based voice activity detector using pure-Python RMS calculation.
@@ -106,6 +126,8 @@ class EnergyVAD(VoiceActivityDetectorInterface):
         self.last_rms: float = 0.0
         self.peak_rms: float = 0.0
         self.last_speech_seconds: float = 0.0
+        self.current_vad_event: str = "none"
+        self._speech_just_started: bool = False
         self.reset()
 
     # ------------------------------------------------------------------ calibration
@@ -187,6 +209,23 @@ class EnergyVAD(VoiceActivityDetectorInterface):
         self.peak_rms = 0.0
         self.last_rms = 0.0
         self.last_speech_seconds = 0.0
+        self.current_vad_event = "none"
+        self._speech_just_started = False
+
+    @property
+    def is_speech_started(self) -> bool:
+        """True only on the exact chunk where speech onset occurred."""
+        return self._speech_just_started
+
+    @property
+    def is_speech_active(self) -> bool:
+        """True while speech is actively progressing."""
+        return self._state in (VADState.SPEAKING, VADState.SILENCE)
+
+    @property
+    def is_speech_ended(self) -> bool:
+        """True when utterance boundary has ended."""
+        return self._state == VADState.COMPLETED and self._speech_confirmed
 
     def _reset_utterance(self) -> None:
         """Discard the current (transient) utterance without resetting session bounds."""
@@ -218,6 +257,9 @@ class EnergyVAD(VoiceActivityDetectorInterface):
             return 0.0
 
     def process_chunk(self, chunk: bytes) -> VADState:
+        self._speech_just_started = False
+        self.current_vad_event = "none"
+
         if self._state == VADState.COMPLETED:
             return self._state
 
@@ -244,6 +286,7 @@ class EnergyVAD(VoiceActivityDetectorInterface):
                 if speech_dur >= self.min_speech_duration:
                     self._speech_confirmed = True
             self.completion_reason = "max_duration" if in_utterance else "no_speech"
+            self.current_vad_event = "speech_ended" if in_utterance else "no_speech"
             logger.info("VAD: Maximum recording duration reached (%.1fs). Forcing COMPLETED.", self.max_recording_duration)
             self._state = VADState.COMPLETED
             return self._state
@@ -254,6 +297,8 @@ class EnergyVAD(VoiceActivityDetectorInterface):
                 self._speech_started_time = now
                 self._silence_started_time = None
                 self._total_speech_bytes += len(chunk)
+                self._speech_just_started = True
+                self.current_vad_event = "speech_started"
                 logger.debug("VAD: Speech onset detected (RMS=%.1f, thr=%.1f)", rms, onset_threshold)
             else:
                 self._adapt_noise_floor(rms)
@@ -262,9 +307,11 @@ class EnergyVAD(VoiceActivityDetectorInterface):
             if is_speech:
                 self._silence_started_time = None
                 self._total_speech_bytes += len(chunk)
+                self.current_vad_event = "speech_continues"
             else:
                 self._state = VADState.SILENCE
                 self._silence_started_time = now
+                self.current_vad_event = "silence_started"
                 logger.debug("VAD: Transitioned SPEAKING -> SILENCE (RMS=%.1f)", rms)
 
         elif self._state == VADState.SILENCE:
@@ -273,6 +320,7 @@ class EnergyVAD(VoiceActivityDetectorInterface):
                 self._state = VADState.SPEAKING
                 self._silence_started_time = None
                 self._total_speech_bytes += len(chunk)
+                self.current_vad_event = "speech_continues"
                 logger.debug("VAD: Speech resumed from SILENCE (RMS=%.1f)", rms)
             else:
                 elapsed_silence = now - (self._silence_started_time or now)
@@ -288,6 +336,7 @@ class EnergyVAD(VoiceActivityDetectorInterface):
                         self._speech_confirmed = True
                         self.last_speech_seconds = speech_duration
                         self.completion_reason = "speech_end"
+                        self.current_vad_event = "speech_ended"
                         logger.info(
                             "VAD: Utterance completed (speech=%.2fs, silence=%.2fs)",
                             speech_duration,
@@ -297,6 +346,9 @@ class EnergyVAD(VoiceActivityDetectorInterface):
                         # Noise spike was shorter than min_speech_duration; discard and wait
                         logger.debug("VAD: Noise transient ignored (duration=%.2fs). Resetting to WAITING.", speech_duration)
                         self._reset_utterance()
+                        self.current_vad_event = "noise_discarded"
+                else:
+                    self.current_vad_event = "speech_continues"
 
         return self._state
 
@@ -308,14 +360,28 @@ class MockVAD(VoiceActivityDetectorInterface):
         self._predefined = list(predefined_transitions or [])
         self._index = 0
         self._state: VADState = VADState.WAITING
+        self.current_vad_event = "none"
 
     @property
     def state(self) -> VADState:
         return self._state
 
+    @property
+    def is_speech_started(self) -> bool:
+        return self._state == VADState.SPEAKING
+
+    @property
+    def is_speech_active(self) -> bool:
+        return self._state in (VADState.SPEAKING, VADState.SILENCE)
+
+    @property
+    def is_speech_ended(self) -> bool:
+        return self._state == VADState.COMPLETED
+
     def reset(self) -> None:
         self._index = 0
         self._state = VADState.WAITING
+        self.current_vad_event = "none"
 
     def set_state(self, state: VADState) -> None:
         """Explicitly inject a state for test scenarios."""
@@ -325,4 +391,8 @@ class MockVAD(VoiceActivityDetectorInterface):
         if self._index < len(self._predefined):
             self._state = self._predefined[self._index]
             self._index += 1
+        if self._state == VADState.SPEAKING:
+            self.current_vad_event = "speech_continues"
+        elif self._state == VADState.COMPLETED:
+            self.current_vad_event = "speech_ended"
         return self._state

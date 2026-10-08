@@ -227,10 +227,12 @@ async def run_voice_assistant() -> None:
         print("\n[ERROR] No active microphone detected. Please plug in a microphone.")
         return
 
-    # 1. Initialize Hardware Voice Pipeline
+    # 1. Initialize Hardware Voice Pipeline with low-latency settings
     capture = SoundDeviceAudioCapture(
         sample_rate=config.audio_sample_rate,
         channels=config.audio_channels,
+        chunk_ms=config.voice_audio_chunk_ms,
+        max_queue_chunks=config.voice_audio_queue_size,
         persistent=True,
     )
     vad = EnergyVAD(
@@ -371,7 +373,11 @@ async def run_voice_assistant() -> None:
 
                         if listen_res.ok and listen_res.transcript:
                             user_cmd = listen_res.transcript.strip()
-                            print(f"\nYou said: \"{user_cmd}\" (latency: capture={listen_res.capture_latency:.2f}s, stt={listen_res.stt_latency:.2f}s)")
+                            lat_info = f"capture={listen_res.capture_latency:.2f}s, stt={listen_res.stt_latency:.2f}s"
+                            if listen_res.latency_metrics:
+                                m = listen_res.latency_metrics
+                                lat_info += f" (turn={m.total_turn_ms:.0f}ms)"
+                            print(f"\nYou said: \"{user_cmd}\" (latency: {lat_info})")
 
                             # Check exit commands
                             if user_cmd.lower() in ("exit", "quit", "goodbye", "bye", "shutdown"):
@@ -393,7 +399,9 @@ async def run_voice_assistant() -> None:
                                 state_machine=state_machine,
                             )
                             print(f"BUDDY: {response_text}\n")
-                            await pipeline.speak(response_text)
+                            completed = await pipeline.speak(response_text, interruptible=True, barge_in=True)
+                            if not completed:
+                                print("[!] Interrupted by user (barge-in active).")
                         else:
                             # Report fine-grained diagnostic category A-F
                             outcome = listen_res.outcome.value

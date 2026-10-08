@@ -54,6 +54,17 @@ class AudioCaptureInterface(ABC):
     def channels(self) -> int:
         """Number of channels (e.g. 1 for mono)."""
 
+    async def stream_chunks(self) -> AsyncIterator[bytes]:
+        """Asynchronously yield audio chunks while capturing."""
+        while self.is_capturing:
+            try:
+                chunk = await self.read_chunk(timeout=0.1)
+                yield chunk
+            except asyncio.TimeoutError:
+                continue
+            except AudioCaptureError:
+                break
+
 
 class MockAudioCapture(AudioCaptureInterface):
     """Deterministic mock audio capture for unit tests and headless environments."""
@@ -87,12 +98,13 @@ class MockAudioCapture(AudioCaptureInterface):
     def channels(self) -> int:
         return self._channels
 
-    def set_canned_audio(self, audio: AudioData) -> None:
+    def set_canned_audio(self, audio: Optional[AudioData]) -> None:
         """Set pre-recorded audio data that will be fed during capture."""
         self._canned_audio = audio
-        self._sample_rate = audio.sample_rate
-        self._channels = audio.channels
-        self._sample_width = audio.sample_width
+        if audio is not None:
+            self._sample_rate = audio.sample_rate
+            self._channels = audio.channels
+            self._sample_width = audio.sample_width
 
     async def start(self) -> None:
         self._is_capturing = True
@@ -163,6 +175,7 @@ class SoundDeviceAudioCapture(AudioCaptureInterface):
         sample_rate: int = 16000,
         channels: int = 1,
         chunk_size: int = 1024,
+        chunk_ms: Optional[int] = None,
         persistent: bool = False,
         max_queue_chunks: int = 256,
         max_buffer_seconds: float = 30.0,
@@ -171,7 +184,10 @@ class SoundDeviceAudioCapture(AudioCaptureInterface):
         self._device_id = device_id
         self._sample_rate = sample_rate
         self._channels = channels
-        self._chunk_size = chunk_size
+        if chunk_ms is not None and chunk_ms > 0:
+            self._chunk_size = max(64, int(sample_rate * (chunk_ms / 1000.0)))
+        else:
+            self._chunk_size = chunk_size
         self._sample_width = 2
         self._persistent = persistent
         self._max_buffer_bytes = int(max_buffer_seconds * sample_rate * channels * self._sample_width)
@@ -396,6 +412,6 @@ class SoundDeviceAudioCapture(AudioCaptureInterface):
             except queue.Empty:
                 if deadline and time.monotonic() > deadline:
                     raise asyncio.TimeoutError("Timeout waiting for audio chunk")
-                await asyncio.sleep(0.01)
+                await asyncio.sleep(0.002)
 
         raise AudioCaptureError("Capture stopped while waiting for chunk")

@@ -79,3 +79,44 @@ class WakeWordDetectedEvent(BaseEvent):
 
     wake_word: str = "hey buddy"
     confidence: float = 1.0
+
+
+@dataclass(frozen=True)
+class VoiceBargeInDetectedEvent(BaseEvent):
+    """Emitted when user voice interruption (barge-in) cancels active speech playback."""
+
+    reason: str = "User speech detected during playback"
+    rms_energy: float = 0.0
+
+
+@dataclass(frozen=True)
+class VoicePartialTranscriptEvent(BaseEvent):
+    """Emitted when streaming STT delivers an intermediate partial transcript."""
+
+    partial_text: str = ""
+    is_final: bool = False
+
+
+@dataclass(frozen=True)
+class VoiceSpeechDetectedEvent(BaseEvent):
+    """Emitted when VAD detects speech onset."""
+
+    rms: float = 0.0
+    threshold: float = 0.0
+
+
+@dataclass(frozen=True)
+class VoiceSpeechEndedEvent(BaseEvent):
+    """Emitted when VAD detects utterance completion."""
+
+    speech_seconds: float = 0.0
+    reason: str = "silence_timeout"
+
+
+@dataclass(frozen=True)
+class VoiceLatencyRecordedEvent(BaseEvent):
+    """Emitted when turn completes with numeric latency metadata."""
+
+    total_turn_ms: float = 0.0
+    metrics_summary: Optional[dict] = None
+

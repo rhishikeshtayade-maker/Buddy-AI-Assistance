@@ -11,12 +11,40 @@ import logging
 import threading
 import time
 from abc import ABC, abstractmethod
-from typing import List, Optional
+from typing import AsyncIterator, Callable, List, Optional
 
 from app.voice.exceptions import TTSError
 from app.voice.models import AudioData
 
 logger = logging.getLogger("buddy.voice.tts")
+
+
+async def clause_stream_from_tokens(token_stream: AsyncIterator[str]) -> AsyncIterator[str]:
+    """Buffer incoming word/subword tokens into coherent clauses/sentences for low-latency streaming TTS."""
+    buf: List[str] = []
+    word_count = 0
+    sentence_delims = {".", "!", "?", "\n"}
+    clause_delims = {",", ";", ":"}
+
+    async for token in token_stream:
+        buf.append(token)
+        if " " in token:
+            word_count += token.count(" ")
+
+        has_sentence = any(d in token for d in sentence_delims)
+        has_clause = any(d in token for d in clause_delims) and word_count >= 5
+
+        if has_sentence or has_clause:
+            clause = "".join(buf).strip()
+            if clause:
+                yield clause
+            buf.clear()
+            word_count = 0
+
+    if buf:
+        remaining = "".join(buf).strip()
+        if remaining:
+            yield remaining
 
 
 class TextToSpeechProvider(ABC):
@@ -26,6 +54,11 @@ class TextToSpeechProvider(ABC):
     @abstractmethod
     def provider_name(self) -> str:
         """Name of the TTS provider."""
+
+    @property
+    def supports_streaming(self) -> bool:
+        """Return True if this provider supports incremental token stream playback."""
+        return True
 
     @property
     @abstractmethod
@@ -40,9 +73,26 @@ class TextToSpeechProvider(ABC):
     async def speak(self, text: str, interruptible: bool = True) -> None:
         """Voicing text through speaker endpoint with interruption capability."""
 
+    async def speak_stream(
+        self,
+        token_stream: AsyncIterator[str],
+        interruptible: bool = True,
+        on_first_audio: Optional[Callable[[], Any]] = None,
+    ) -> None:
+        """Streamingly ingest text tokens, chunk into sentences/clauses, and voice incrementally."""
+        first_fired = False
+        async for clause in clause_stream_from_tokens(token_stream):
+            if not first_fired and on_first_audio:
+                first_fired = True
+                res = on_first_audio()
+                if asyncio.iscoroutine(res):
+                    await res
+            await self.speak(clause, interruptible=interruptible)
+
     @abstractmethod
     async def stop(self) -> None:
         """Immediately interrupt and halt any ongoing speech playback."""
+
 
 
 class MockTTSProvider(TextToSpeechProvider):
@@ -114,6 +164,33 @@ class MockTTSProvider(TextToSpeechProvider):
 
             self._spoken_phrases.append(text)
             logger.debug("MockTTS: Spoke phrase: '%s'", text)
+        finally:
+            self._is_speaking = False
+
+    async def speak_stream(
+        self,
+        token_stream: AsyncIterator[str],
+        interruptible: bool = True,
+        on_first_audio: Optional[Callable[[], Any]] = None,
+    ) -> None:
+        self._is_speaking = True
+        self._interrupted = False
+        self._stop_event.clear()
+        first_fired = False
+
+        try:
+            async for clause in clause_stream_from_tokens(token_stream):
+                if self._stop_event.is_set():
+                    self._interrupted = True
+                    break
+                if not first_fired and on_first_audio:
+                    first_fired = True
+                    res = on_first_audio()
+                    if asyncio.iscoroutine(res):
+                        await res
+                await self.speak(clause, interruptible=interruptible)
+                if self._interrupted:
+                    break
         finally:
             self._is_speaking = False
 
@@ -219,6 +296,31 @@ class Pyttsx3TTSProvider(TextToSpeechProvider):
         except Exception as e:
             logger.error("TTS playback error: %s", e)
             raise TTSError(f"TTS playback error: {e}") from e
+        finally:
+            self._is_speaking = False
+
+    async def speak_stream(
+        self,
+        token_stream: AsyncIterator[str],
+        interruptible: bool = True,
+        on_first_audio: Optional[Callable[[], Any]] = None,
+    ) -> None:
+        self._is_speaking = True
+        self._stop_requested = False
+        first_fired = False
+
+        try:
+            async for clause in clause_stream_from_tokens(token_stream):
+                if self._stop_requested:
+                    break
+                if not first_fired and on_first_audio:
+                    first_fired = True
+                    res = on_first_audio()
+                    if asyncio.iscoroutine(res):
+                        await res
+                await self.speak(clause, interruptible=interruptible)
+                if self._stop_requested:
+                    break
         finally:
             self._is_speaking = False
 

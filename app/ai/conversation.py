@@ -452,3 +452,81 @@ class ConversationManager:
                         self._state_machine.transition_to(BuddyState.IDLE, reason="Recovery from AI error")
 
                 raise
+
+    async def process_user_turn_stream(
+        self,
+        user_text: str,
+        source: ContentSource = ContentSource.USER_INPUT,
+        provider_override: Optional[str] = None,
+    ) -> AsyncIterator[str]:
+        """Stream conversational AI response tokens incrementally.
+
+        Strict security invariant:
+          Tool execution remains structured, validated, and permission-checked.
+          Tool calls are NEVER executed from partial natural-language tokens.
+        """
+        async with self._lock:
+            content = user_text
+            if source == ContentSource.UNTRUSTED_EXTERNAL:
+                content = wrap_untrusted_content(user_text, source="external")
+
+            user_msg = ChatMessage(
+                role=MessageRole.USER,
+                content=content,
+                source=source,
+            )
+            self._history.append(user_msg)
+            self._truncate_history_if_needed()
+
+            if self._state_machine.can_transition_to(BuddyState.THINKING):
+                self._state_machine.transition_to(
+                    BuddyState.THINKING,
+                    reason="Processing conversational streaming turn",
+                )
+
+            provider = self._router.get_provider(provider_override)
+
+            effective_system_prompt = self._system_prompt
+            if self._memory_manager:
+                try:
+                    recalled = await self._memory_manager.recall(
+                        user_text,
+                        limit=self._config.memory_max_context_records,
+                    )
+                    recalled_block = self._memory_manager.format_for_context(recalled)
+                    if recalled_block:
+                        effective_system_prompt = f"{self._system_prompt}\n\n{recalled_block}"
+                except Exception as e:
+                    logger.warning("Failed to recall memories for streaming turn: %s", e)
+
+            tokens: List[str] = []
+            try:
+                stream = provider.generate_stream(
+                    messages=self._history,
+                    system_prompt=effective_system_prompt,
+                    model=self._config.ai_model,
+                    temperature=self._config.ai_temperature,
+                    max_tokens=self._config.ai_max_tokens,
+                    timeout=self._config.ai_timeout,
+                )
+                async for tok in stream:
+                    tokens.append(tok)
+                    yield tok
+
+                full_response = "".join(tokens).strip()
+                assistant_msg = ChatMessage(
+                    role=MessageRole.ASSISTANT,
+                    content=full_response,
+                    source=ContentSource.INTERNAL,
+                )
+                self._history.append(assistant_msg)
+                self._truncate_history_if_needed()
+
+            except Exception as err:
+                logger.error("Error during streaming conversation turn: %s", err, exc_info=True)
+                if self._state_machine.can_transition_to(BuddyState.ERROR):
+                    self._state_machine.transition_to(BuddyState.ERROR, reason=f"Streaming AI failure: {err}")
+                    if self._state_machine.can_transition_to(BuddyState.IDLE):
+                        self._state_machine.transition_to(BuddyState.IDLE, reason="Recovery from streaming AI error")
+                raise
+
