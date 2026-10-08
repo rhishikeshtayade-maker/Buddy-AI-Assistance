@@ -530,7 +530,18 @@ class VoicePipeline:
                     await stt_session.cancel()
                 await self._capture.cancel()
                 await self._handle_recognition_failure("TimeoutError", "Listening timed out")
+                sample_rate = getattr(self._config, "audio_sample_rate", 16000) or 16000
+                total_samples = bytes_received // 2
                 diag.chunks_received = chunks_received
+                diag.bytes_received = bytes_received
+                diag.first_chunk_latency = first_chunk_t
+                diag.peak_rms = peak_rms
+                diag.mean_rms = (sum_rms / chunks_received) if chunks_received > 0 else 0.0
+                diag.speech_detected = getattr(self._vad, "has_speech", False)
+                diag.speech_seconds = getattr(self._vad, "last_speech_seconds", 0.0)
+                diag.window_seconds = total_samples / sample_rate if sample_rate > 0 else 0.0
+                diag.utterance_seconds = diag.speech_seconds
+                diag.termination = "timeout"
                 metrics.success = False
                 metrics.capture_end_ms = time.perf_counter() * 1000.0
                 metrics.total_turn_ms = (time.perf_counter() - start_pipeline_time) * 1000.0
@@ -539,6 +550,8 @@ class VoicePipeline:
                     error_message=f"Listening timed out after {listen_timeout}s",
                     diagnostics=diag,
                     latency_metrics=metrics,
+                    capture_latency=time.perf_counter() - vad_start_time,
+                    total_latency=time.perf_counter() - start_pipeline_time,
                 )
 
             except Exception as err:
@@ -547,6 +560,14 @@ class VoicePipeline:
                     await stt_session.cancel()
                 await self._capture.cancel()
                 await self._handle_recognition_failure(type(err).__name__, str(err))
+                sample_rate = getattr(self._config, "audio_sample_rate", 16000) or 16000
+                total_samples = bytes_received // 2
+                diag.chunks_received = chunks_received
+                diag.bytes_received = bytes_received
+                diag.peak_rms = peak_rms
+                diag.mean_rms = (sum_rms / chunks_received) if chunks_received > 0 else 0.0
+                diag.window_seconds = total_samples / sample_rate if sample_rate > 0 else 0.0
+                diag.termination = "error"
                 metrics.success = False
                 metrics.capture_end_ms = time.perf_counter() * 1000.0
                 metrics.total_turn_ms = (time.perf_counter() - start_pipeline_time) * 1000.0
@@ -813,6 +834,12 @@ class VoicePipeline:
                     )
                 return detected
 
+            except asyncio.CancelledError:
+                try:
+                    await self._capture.cancel()
+                except Exception:
+                    pass
+                raise
             except Exception as e:
                 logger.debug("Wake word detection loop error: %s", e)
                 try:

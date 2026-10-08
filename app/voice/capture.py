@@ -343,19 +343,17 @@ class SoundDeviceAudioCapture(AudioCaptureInterface):
 
     async def start(self) -> None:
         async with self._lock:
-            if self._is_capturing:
-                return
             self._accumulated_bytes.clear()
             self._drain_queue()
             self.window_chunks_received = 0
-            try:
-                await self._open_stream_locked()
-            except Exception:
-                self._is_capturing = False
-                raise
-            # Discard anything captured before this window started (stale audio)
-            self._drain_queue()
-            self._is_capturing = True
+            if not self._is_capturing:
+                try:
+                    await self._open_stream_locked()
+                except Exception:
+                    self._is_capturing = False
+                    raise
+                self._drain_queue()
+                self._is_capturing = True
 
     async def stop(self) -> AudioData:
         async with self._lock:

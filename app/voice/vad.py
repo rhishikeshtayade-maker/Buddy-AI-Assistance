@@ -88,9 +88,9 @@ class EnergyVAD(VoiceActivityDetectorInterface):
         sample_rate: int = 16000,
         sample_width: int = 2,
         *,
-        min_threshold: float = 35.0,
-        noise_ratio: float = 2.2,
-        noise_margin: float = 40.0,
+        min_threshold: float = 24.0,
+        noise_ratio: float = 1.8,
+        noise_margin: float = 16.0,
         continue_ratio: float = 0.75,
         adaptive: bool = True,
         noise_adapt_rate: float = 0.05,
@@ -112,6 +112,8 @@ class EnergyVAD(VoiceActivityDetectorInterface):
         self.use_audio_clock = use_audio_clock
 
         self.noise_floor: Optional[float] = None
+        self._base_noise_floor: Optional[float] = None
+        self._base_energy_threshold: float = energy_threshold
         self._calibrated = False
         self._recent_rms: Deque[float] = deque(maxlen=64)
 
@@ -142,7 +144,9 @@ class EnergyVAD(VoiceActivityDetectorInterface):
         """Dynamically adjust energy threshold above the measured ambient room noise."""
         floor = max(0.0, float(ambient_rms))
         self.noise_floor = floor
+        self._base_noise_floor = floor
         self.energy_threshold = self._threshold_from_floor(floor)
+        self._base_energy_threshold = self.energy_threshold
         self._calibrated = True
         logger.info("VAD: Calibrated to ambient RMS %.1f -> energy threshold: %.1f", floor, self.energy_threshold)
 
@@ -179,15 +183,23 @@ class EnergyVAD(VoiceActivityDetectorInterface):
             p30,
         )
         self.noise_floor = p30
+        self._base_noise_floor = p30
         self.energy_threshold = new_threshold
+        self._base_energy_threshold = new_threshold
         self._calibrated = True
         return True
 
     def _adapt_noise_floor(self, rms: float) -> None:
         if not (self.adaptive and self._calibrated) or self.noise_floor is None:
             return
+        # Speech protection: Never adapt noise floor upwards into speech candidate range
+        if rms > self.noise_floor * 1.3:
+            return
         a = self.noise_adapt_rate
-        self.noise_floor = (1.0 - a) * self.noise_floor + a * rms
+        new_floor = (1.0 - a) * self.noise_floor + a * rms
+        base_floor = self._base_noise_floor if self._base_noise_floor is not None else self.noise_floor
+        max_floor = max(base_floor * 1.35, base_floor + 8.0)
+        self.noise_floor = min(new_floor, max_floor)
         self.energy_threshold = self._threshold_from_floor(self.noise_floor)
 
     # ------------------------------------------------------------------ state
@@ -211,6 +223,9 @@ class EnergyVAD(VoiceActivityDetectorInterface):
         self.last_speech_seconds = 0.0
         self.current_vad_event = "none"
         self._speech_just_started = False
+        if self._calibrated and self._base_noise_floor is not None:
+            self.noise_floor = self._base_noise_floor
+            self.energy_threshold = self._base_energy_threshold
 
     @property
     def is_speech_started(self) -> bool:
