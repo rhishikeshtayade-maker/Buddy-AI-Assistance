@@ -85,8 +85,25 @@ def main(args: list[str] | None = None) -> int:
         action="store_true",
         help="Keep BUDDY running in daemon/interactive mode until terminated",
     )
+    parser.add_argument(
+        "--desktop",
+        "--gui",
+        action="store_true",
+        help="Launch BUDDY persistent background assistant with animated glass HUD",
+    )
+    parser.add_argument(
+        "--tray",
+        action="store_true",
+        help="Launch desktop assistant minimized to system tray",
+    )
     # If args is None, treat as empty list to prevent argparse inspecting sys.argv during unit tests
     parsed = parser.parse_args([] if args is None else args)
+
+    if parsed.desktop or parsed.tray:
+        from app.desktop.app import BuddyDesktopApp
+
+        desktop_app = BuddyDesktopApp(start_in_tray=parsed.tray)
+        return desktop_app.run()
 
     return asyncio.run(run_buddy(keep_alive=parsed.run))
 

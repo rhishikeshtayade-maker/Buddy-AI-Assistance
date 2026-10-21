@@ -219,3 +219,35 @@ pytest tests/integration/test_long_horizon_agent.py tests/integration/test_reaso
 pytest tests/e2e/test_long_horizon_tasks.py tests/e2e/test_failure_recovery.py tests/e2e/test_ambiguous_goal.py tests/e2e/test_budget_exhaustion.py tests/e2e/test_security_block_during_long_task.py -v
 ```
 
+---
+
+## 13. Loop 15: Persistent Background Assistant & Animated Glass HUD
+
+### Launching BUDDY Desktop Companion:
+```powershell
+# Launch the persistent desktop assistant with floating Glass HUD
+python -m app.desktop
+
+# Or launch via core CLI entry point
+python -m app.main --desktop
+
+# Launch minimized directly to system tray
+python -m app.desktop --tray
+```
+
+### Running Desktop Tests & Windows GUI Smoke Test:
+```powershell
+# Run the real Windows GUI smoke test (measures startup, idle CPU, memory RSS, HUD animations, shutdown latency)
+python scripts/desktop_smoke_test.py
+
+# Run all Loop 15 unit and security tests
+pytest tests/unit/test_desktop_settings.py tests/unit/test_desktop_startup.py tests/unit/test_desktop_single_instance.py tests/unit/test_desktop_bridge.py tests/unit/test_desktop_runtime.py tests/unit/test_desktop_ui.py tests/security/test_desktop_security.py -v
+```
+
+### Voice & Interaction Controls:
+- **Wake Word**: Speak `"Hey BUDDY"` to activate listening.
+- **Pause Listening**: Say `"Hey BUDDY, stop listening"` or click the microphone chip on the HUD / system tray action to mute the microphone and release audio devices.
+- **Resume Listening**: Click the mic chip or select `"Resume Listening"` from the system tray menu.
+- **Safe Exit**: Say `"Exit BUDDY"` (prompts for spoken confirmation before closing), or right-click the system tray icon and select `"Exit BUDDY"`.
+
+

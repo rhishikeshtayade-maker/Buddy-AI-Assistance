@@ -39,7 +39,7 @@ BUDDY is developed using strict **Loop Engineering**:
 - [x] **LOOP 12**: Advanced Reasoning & Long-Horizon Agent Orchestration (Strongly typed goal model, deterministic requirement extraction, ambiguity detection & blocking clarification, DAG planner with cycle prevention, plan quality evaluation, explainable confidence model, milestone & checkpoint tracking, intermediate outcome evaluation, failure diagnosis, bounded safe replanning, task budgets, safe parallel execution, bounded specialist roles)
 - [ ] **LOOP 13**: Security & Permission Engine (Risk Levels 0-4)
 - [ ] **LOOP 14**: User Confirmation Workflows
-- [ ] **LOOP 15**: Authentication (PIN / Local verification)
+- [x] **LOOP 15**: Persistent Background Assistant + Animated Glass HUD (Managed lifecycle, system tray, breathing AI orb, audio-reactive waveform, pause/resume mic control, single-instance mutex, opt-in login startup)
 - [ ] **LOOP 16**: Tamper-Evident Audit Logging
 - [ ] **LOOP 17**: Computer Vision & Screen Understanding
 - [ ] **LOOP 18**: Developer Mode (Diagnostic & build tools)

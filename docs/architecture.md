@@ -704,3 +704,38 @@ INTERMEDIATE OUTCOME EVALUATOR (Empirical result verification)
 6. **Task Budgets**: Hard deterministic bounds enforce maximum steps, duration, tool counts, and replans to prevent runaway execution.
 7. **Specialist Roles with Bounded Capabilities**: Roles (`ResearcherRole`, `CoderRole`, `BrowserRole`, `ComputerRole`, `VerifierRole`) enforce principle of least privilege.
 
+---
+
+## 16. Loop 15: Persistent Desktop Runtime & Animated Glass HUD
+
+Loop 15 transforms BUDDY from a console script into a persistent Windows desktop companion with a floating, animated glassmorphism HUD interface:
+
+```
++-----------------------------------------------------------------------------------+
+|                        PYSIDE6 DESKTOP GUI THREAD                                 |
+|  Glass HUD Window  |  Animated AI Orb  |  Audio Waveform  |  Tray  |  Settings    |
++------------------------------------------+----------------------------------------+
+                                           | Thread-safe Qt Signals
+                                           v
++-----------------------------------------------------------------------------------+
+|                       ASYNCIO RUNTIME BACKGROUND THREAD                           |
+|  - DesktopRuntime (SingleInstanceGuard via Windows Named Mutex)                   |
+|  - RuntimeEventBridge: Maps core StateMachine & Voice events -> UiUpdate          |
+|  - Persistent Wake-Word Loop (EnergyVAD + KeywordWakeWordDetector)                |
+|  - VoiceCommandRouter & Shared Dispatcher (app/desktop/dispatch.py)               |
+|  - ToolExecutor & ConversationManager Integration                                 |
+|  - MeteredAudioCapture: Real-time RMS audio level tap (zero raw audio retention)  |
+|  - Orderly Shutdown: Capture release, memory store close, lifecycle cleanup       |
++-----------------------------------------------------------------------------------+
+```
+
+### Key Architectural Tenets:
+1. **Thread Separation**: All GUI widgets, animations, and Qt event processing execute strictly on the main GUI thread; all audio capture, speech recognition, AI reasoning, and tool execution run in an asyncio event loop on a dedicated background worker thread.
+2. **Real-time State Synchronization**: The HUD is driven strictly by real BUDDY state machine events (`BuddyState`) and voice events (`VoiceListeningStartedEvent`, `ToolExecutionStartedEvent`, etc.), not artificial simulation timers.
+3. **Audio Privacy & Ephemeral Metering**: The `MeteredAudioCapture` computes instantaneous scalar RMS levels [0.0, 1.0] for the waveform and orb visualizers in memory; raw audio chunks are immediately dropped without writing to disk.
+4. **Single-Instance Protection**: A Windows named mutex (`Local\\BUDDY-Desktop-Assistant`) prevents multiple assistant instances from contending for audio endpoints or opening competing microphone streams.
+5. **Listening Control & Privacy Mute**: An explicit voice command ("Hey BUDDY, stop listening") or UI/tray toggle pauses microphone capture, releases the underlying audio device (releasing Windows privacy indicators), and switches visual state to `PAUSED`.
+6. **Safeguarded Exit**: Spoken exit commands ("Exit BUDDY") require explicit user confirmation ("Say yes to confirm") before triggering orderly termination.
+7. **Explicit Login Startup**: "Start BUDDY when I sign in" is disabled by default. When explicitly enabled by the user, it registers a transparent, user-visible entry in `HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Run` (visible in Windows Task Manager Startup tab). No hidden persistence mechanisms or system services are used.
+8. **Security Boundary Integrity**: All actions flow through `ToolRegistry -> ToolExecutor -> PermissionEngine -> ConfirmationManager -> Verification -> Audit`. The desktop HUD provides no direct shell or eval execution pathways.
+
