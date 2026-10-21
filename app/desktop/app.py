@@ -57,6 +57,7 @@ class BuddyDesktopApp:
         config: Optional[BuddyConfig] = None,
         start_in_tray: bool = False,
         use_mock_voice: bool = False,
+        guard: Optional[SingleInstanceGuard] = None,
     ) -> None:
         self._config = config or BuddyConfig.load_from_env()
         self._settings_store = SettingsStore()
@@ -65,7 +66,7 @@ class BuddyDesktopApp:
         self._use_mock_voice = use_mock_voice
 
         # Instance guard
-        self._guard = SingleInstanceGuard()
+        self._guard = guard or SingleInstanceGuard()
 
         # Qt Application
         self._qapp: Optional[QApplication] = None
@@ -109,6 +110,7 @@ class BuddyDesktopApp:
             on_ui_update=self._hud.on_ui_update,
             confirm_callback=self._gui_confirm_callback,
             use_mock_voice=self._use_mock_voice,
+            instance_guard=self._guard,
         )
 
         # Wire HUD signals

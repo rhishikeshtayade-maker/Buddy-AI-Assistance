@@ -57,15 +57,26 @@ class SingleInstanceGuard:
         kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
         kernel32.CloseHandle.restype = wintypes.BOOL
 
+        ctypes.set_last_error(0)
         # "Local\" scopes the mutex to the current logon session (per user).
-        handle = kernel32.CreateMutexW(None, False, f"Local\\{self._name}")
+        mutex_name = f"Local\\{self._name}"
+        handle = kernel32.CreateMutexW(None, False, mutex_name)
         last_error = ctypes.get_last_error()
         if not handle:
-            logger.error("CreateMutexW failed (error=%s); refusing to start a second runtime.", last_error)
+            logger.error(
+                "CreateMutexW failed for '%s' (Win32 error=%d); unable to acquire instance lock.",
+                mutex_name,
+                last_error,
+            )
             return False
         if last_error == _ERROR_ALREADY_EXISTS:
+            logger.info(
+                "Named mutex '%s' already exists (Win32 error=183); another instance is currently running.",
+                mutex_name,
+            )
             kernel32.CloseHandle(handle)
             return False
+        logger.debug("Named mutex '%s' acquired successfully (handle=%s).", mutex_name, handle)
         self._handle = handle
         self._kernel32 = kernel32
         return True
@@ -74,33 +85,43 @@ class SingleInstanceGuard:
         import fcntl
 
         path = Path(tempfile.gettempdir()) / f"{self._name}.lock"
-        fh = open(path, "a+")
+        try:
+            fh = open(path, "a+")
+        except OSError as e:
+            logger.error("Failed to open lockfile '%s': %s", path, e)
+            return False
+
         try:
             fcntl.flock(fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except OSError:
+        except OSError as e:
+            logger.info("Lockfile '%s' is locked by another process: %s", path, e)
             fh.close()
             return False
+
         fh.seek(0)
         fh.truncate()
         fh.write(str(os.getpid()))
         fh.flush()
         self._lock_file = fh
+        logger.debug("Lockfile '%s' acquired successfully.", path)
         return True
 
     def release(self) -> None:
         if not self._acquired:
             return
-        if self._handle is not None:
+        if self._handle is not None and getattr(self, "_kernel32", None) is not None:
             try:
                 self._kernel32.CloseHandle(self._handle)
-            except Exception:  # pragma: no cover
-                pass
+                logger.debug("Named mutex 'Local\\%s' handle closed.", self._name)
+            except Exception as e:  # pragma: no cover
+                logger.debug("CloseHandle exception: %s", e)
             self._handle = None
         if self._lock_file is not None:  # pragma: no cover - non-Windows path
             try:
                 self._lock_file.close()
-            except Exception:
-                pass
+                logger.debug("Lockfile '%s.lock' closed.", self._name)
+            except Exception as e:
+                logger.debug("Lockfile close exception: %s", e)
             self._lock_file = None
         self._acquired = False
 

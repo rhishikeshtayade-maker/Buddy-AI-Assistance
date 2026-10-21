@@ -141,3 +141,35 @@ class TestDesktopRuntime(unittest.TestCase):
         self.assertIn("what is the current time", transcripts)
 
         runtime.stop_and_join(timeout=4.0)
+
+    def test_injected_instance_guard_and_ownership_preservation(self) -> None:
+        """When DesktopRuntime is given an external guard, it uses it and doesn't release it on shutdown."""
+        from app.desktop.single_instance import SingleInstanceGuard
+
+        inst_name = f"test-injected-{uuid.uuid4().hex[:8]}"
+        guard = SingleInstanceGuard(name=inst_name)
+        self.assertTrue(guard.acquire())
+
+        runtime = DesktopRuntime(
+            config=self.config,
+            settings=self.settings,
+            settings_store=self.store,
+            on_ui_update=self.updates.append,
+            use_mock_voice=True,
+            instance_guard=guard,
+        )
+
+        try:
+            started = runtime.start_background()
+            self.assertTrue(started, "Runtime must start successfully with pre-acquired injected guard")
+            self.assertTrue(runtime.is_running)
+
+            runtime.stop_and_join(timeout=4.0)
+            self.assertFalse(runtime.is_running)
+
+            # Injected guard must STILL be acquired (not released by runtime)
+            self.assertTrue(guard.acquired, "Injected guard must not be released by DesktopRuntime")
+        finally:
+            guard.release()
+            self.assertFalse(guard.acquired)
+

@@ -79,6 +79,7 @@ class DesktopRuntime:
         confirm_callback: Optional[Callable[[str], Union[bool, Coroutine[Any, Any, bool]]]] = None,
         use_mock_voice: bool = False,
         instance_name: Optional[str] = None,
+        instance_guard: Optional[SingleInstanceGuard] = None,
     ) -> None:
         self._config = config or BuddyConfig.load_from_env()
         self._settings_store = settings_store or SettingsStore()
@@ -87,7 +88,8 @@ class DesktopRuntime:
         self._confirm_callback = confirm_callback
 
         # Single instance guard
-        self._instance_guard = SingleInstanceGuard(name=instance_name or "BUDDY-Desktop-Assistant")
+        self._instance_guard = instance_guard or SingleInstanceGuard(name=instance_name or "BUDDY-Desktop-Assistant")
+        self._owns_guard = (instance_guard is None)
 
         # Core lifecycle manager
         self._lifecycle = LifecycleManager(self._config)
@@ -169,7 +171,15 @@ class DesktopRuntime:
 
         # Wait for event loop to initialize (timeout 10s)
         ready = self._loop_ready.wait(timeout=10.0)
-        return ready and self._is_running
+        if not ready or not self._is_running:
+            logger.error("DesktopRuntime failed to initialize within timeout or encountered error.")
+            self.request_shutdown()
+            if self._thread and self._thread.is_alive():
+                self._thread.join(timeout=2.0)
+            if self._owns_guard:
+                self._instance_guard.release()
+            return False
+        return True
 
     def _thread_entry(self) -> None:
         loop = asyncio.new_event_loop()
@@ -220,6 +230,7 @@ class DesktopRuntime:
             logger.error("Fatal exception in DesktopRuntime: %s", err, exc_info=True)
             self._bridge.emit_update()
         finally:
+            self._loop_ready.set()
             await self._cleanup()
 
     # -------------------------------------------------------------------------
@@ -541,7 +552,8 @@ class DesktopRuntime:
         self.request_shutdown()
         if self._thread and self._thread.is_alive():
             self._thread.join(timeout=timeout)
-        self._instance_guard.release()
+        if self._owns_guard:
+            self._instance_guard.release()
         logger.info("DesktopRuntime stopped and resources released.")
 
     # -------------------------------------------------------------------------
@@ -581,7 +593,8 @@ class DesktopRuntime:
         except Exception as e:
             logger.warning("Lifecycle shutdown error: %s", e)
 
-        # 5. Release single instance mutex
-        self._instance_guard.release()
+        # 5. Release single instance mutex if owned
+        if self._owns_guard:
+            self._instance_guard.release()
         self._is_running = False
         logger.info("Orderly cleanup completed.")
