@@ -44,9 +44,10 @@ class WakeWordDetector(ABC):
 class MockWakeWordDetector(WakeWordDetector):
     """Deterministic mock detector for unit tests."""
 
-    def __init__(self, wake_word: str = "hey buddy", default_result: bool = True) -> None:
+    def __init__(self, wake_word: str = "hey buddy", default_result: bool = True, default_transcript: Optional[str] = None) -> None:
         self._wake_word = wake_word.strip().lower()
         self.default_result = default_result
+        self.last_transcript: Optional[str] = default_transcript
         self.detect_call_count = 0
         self.chunk_call_count = 0
 
@@ -58,8 +59,10 @@ class MockWakeWordDetector(WakeWordDetector):
     def is_local(self) -> bool:
         return True
 
-    def set_result(self, result: bool) -> None:
+    def set_result(self, result: bool, transcript: Optional[str] = None) -> None:
         self.default_result = result
+        if transcript is not None:
+            self.last_transcript = transcript
 
     async def detect(self, audio: AudioData) -> bool:
         self.detect_call_count += 1
@@ -73,9 +76,16 @@ class MockWakeWordDetector(WakeWordDetector):
 class KeywordWakeWordDetector(WakeWordDetector):
     """Wake-word detector using an underlying STT provider to check for trigger words."""
 
-    def __init__(self, stt_provider: Any, wake_word: str = "hey buddy") -> None:
+    def __init__(
+        self,
+        stt_provider: Any,
+        wake_word: str = "hey buddy",
+        allow_direct_commands: bool = False,
+    ) -> None:
         self._stt = stt_provider
         self._wake_word = wake_word.strip().lower()
+        self._allow_direct_commands = allow_direct_commands
+        self.last_transcript: Optional[str] = None
 
     @property
     def wake_word(self) -> str:
@@ -86,6 +96,32 @@ class KeywordWakeWordDetector(WakeWordDetector):
         # Check if underlying STT provider is local
         return getattr(self._stt, "provider_name", "").startswith("mock") or "sphinx" in getattr(self._stt, "provider_name", "")
 
+    def reset(self) -> None:
+        self.last_transcript = None
+
+    def _is_direct_command(self, text: str) -> bool:
+        """Check if transcript matches a known system command without wake prefix."""
+        try:
+            from app.voice.command_router import VoiceCommandRouter, VoiceIntentType
+            router = VoiceCommandRouter()
+            intent = router.classify(text)
+            if intent.intent_type in (
+                VoiceIntentType.TOOL_REQUEST,
+                VoiceIntentType.MEMORY_REMEMBER,
+                VoiceIntentType.MEMORY_RECALL,
+                VoiceIntentType.MEMORY_FORGET,
+            ):
+                return True
+            if intent.direct_response is not None:
+                return True
+            from app.desktop.runtime import PAUSE_LISTENING_PATTERNS, EXIT_BUDDY_PATTERNS
+            clean = text.lower().rstrip(".!? ")
+            if any(p in clean for p in PAUSE_LISTENING_PATTERNS) or any(p in clean for p in EXIT_BUDDY_PATTERNS):
+                return True
+        except Exception:
+            pass
+        return False
+
     async def detect(self, audio: AudioData) -> bool:
         if not audio or not audio.raw_data:
             return False
@@ -93,9 +129,14 @@ class KeywordWakeWordDetector(WakeWordDetector):
         try:
             result = await self._stt.transcribe(audio)
             transcript_clean = result.transcript.strip().lower()
+            self.last_transcript = result.transcript.strip()
             detected = self._wake_word in transcript_clean
+
+            if not detected and self._allow_direct_commands:
+                detected = self._is_direct_command(transcript_clean)
+
             if detected:
-                logger.info("Wake word '%s' detected in transcript: '%s'", self._wake_word, transcript_clean)
+                logger.info("Wake/command detected in transcript: '%s'", transcript_clean)
             return detected
         except Exception as e:
             logger.debug("Wake word detection transcription failed: %s", e)

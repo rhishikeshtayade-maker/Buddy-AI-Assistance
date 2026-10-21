@@ -173,3 +173,45 @@ class TestDesktopRuntime(unittest.TestCase):
             guard.release()
             self.assertFalse(guard.acquired)
 
+    def test_extract_inline_command(self) -> None:
+        """Verify command extraction from wake utterances with and without wake word."""
+        runtime = DesktopRuntime(
+            config=self.config,
+            settings=self.settings,
+            settings_store=self.store,
+            use_mock_voice=True,
+        )
+
+        # 1. Wake word + command in single sentence
+        self.assertEqual(
+            runtime._extract_inline_command("hey buddy open notepad"),
+            "open notepad",
+        )
+        self.assertEqual(
+            runtime._extract_inline_command("Hey BUDDY, what is the battery status?"),
+            "what is the battery status",
+        )
+
+        # 2. Wake word alone (should return None to trigger prompt and active turn)
+        self.assertIsNone(runtime._extract_inline_command("hey buddy"))
+        self.assertIsNone(runtime._extract_inline_command("hey buddy!"))
+
+        # 3. Direct commands without wake word
+        self.assertEqual(
+            runtime._extract_inline_command("what is the battery status"),
+            "what is the battery status",
+        )
+        self.assertEqual(
+            runtime._extract_inline_command("open notepad"),
+            "open notepad",
+        )
+        self.assertEqual(
+            runtime._extract_inline_command("what is the time"),
+            "what is the time",
+        )
+
+        # 4. Non-command conversational babble without wake word (should return None)
+        self.assertIsNone(runtime._extract_inline_command("yes I agree with that"))
+        self.assertIsNone(runtime._extract_inline_command("the weather outside is nice"))
+
+

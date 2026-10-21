@@ -213,8 +213,8 @@ class VoiceCommandRouter:
                 memory_content=content_to_save,
             )
 
-        # 4. Built-in conversational utilities (Time & Date queries)
-        if any(q in cleaned for q in ["what time is it", "current time", "tell me the time", "what's the time"]):
+        # 4. Built-in conversational utilities (Time, Date, Identity, Help queries)
+        if any(q in cleaned for q in ["what time is it", "current time", "tell me the time", "what's the time", "what is the time", "time now", "tell the time"]):
             now_str = datetime.datetime.now().strftime("%I:%M %p")
             return VoiceIntent(
                 intent_type=VoiceIntentType.CONVERSATION,
@@ -222,12 +222,26 @@ class VoiceCommandRouter:
                 direct_response=f"The current time is {now_str}.",
             )
 
-        if any(q in cleaned for q in ["what's today's date", "what is today's date", "what date is it", "today's date"]):
+        if any(q in cleaned for q in ["what's today's date", "what is today's date", "what date is it", "today's date", "what is the date", "what's the date", "current date"]):
             today_str = datetime.datetime.now().strftime("%A, %B %d, %Y")
             return VoiceIntent(
                 intent_type=VoiceIntentType.CONVERSATION,
                 normalized_text=raw,
                 direct_response=f"Today is {today_str}.",
+            )
+
+        if any(q in cleaned for q in ["who are you", "what is your name", "what's your name"]):
+            return VoiceIntent(
+                intent_type=VoiceIntentType.CONVERSATION,
+                normalized_text=raw,
+                direct_response="I am BUDDY, your AI desktop assistant.",
+            )
+
+        if any(q in cleaned for q in ["what can you do", "help", "list commands", "show commands", "voice commands"]):
+            return VoiceIntent(
+                intent_type=VoiceIntentType.CONVERSATION,
+                normalized_text=raw,
+                direct_response="You can ask me to open or close applications like Notepad and Calculator, check or adjust volume, check battery status, tell you the time and date, or remember notes for you.",
             )
 
         # 5. Default fallback: Safe Natural Language Dialogue

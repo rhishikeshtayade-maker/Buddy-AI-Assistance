@@ -97,7 +97,7 @@ class BuddyDesktopApp:
         # Initialize System Tray
         self._tray = BuddySystemTray(
             on_toggle_show=self._handle_tray_toggle,
-            on_pause_resume=self._handle_toggle_listening,
+            on_pause_resume=self._handle_tray_pause_resume,
             on_open_settings=self._handle_open_settings,
             on_exit=self.exit_application,
         )
@@ -115,7 +115,7 @@ class BuddyDesktopApp:
         )
 
         # Wire HUD signals
-        self._hud.toggle_listening_requested.connect(self._handle_toggle_listening)
+        self._hud.toggle_listening_requested.connect(self._handle_hud_mic_click)
         self._hud.submit_text_requested.connect(self._handle_submit_text)
         self._hud.settings_requested.connect(self._handle_open_settings)
         self._hud.exit_requested.connect(self.exit_application)
@@ -168,15 +168,27 @@ class BuddyDesktopApp:
             if self._tray:
                 self._tray.set_hud_visible_state(True)
 
-    def _handle_toggle_listening(self) -> None:
+    def _handle_hud_mic_click(self) -> None:
+        """Clicking the HUD mic chip: if paused, resume; if active, trigger an immediate command turn."""
         if not self._runtime:
             return
         if self._runtime.is_paused:
-            self._runtime.resume_listening(reason="User clicked listening toggle")
+            self._runtime.resume_listening(reason="User clicked listening toggle on HUD")
             if self._tray:
                 self._tray.set_paused_state(False)
         else:
-            self._runtime.pause_listening(reason="User clicked listening toggle")
+            self._runtime.trigger_listen_turn()
+
+    def _handle_tray_pause_resume(self) -> None:
+        """Explicit pause/resume toggle from tray icon context menu."""
+        if not self._runtime:
+            return
+        if self._runtime.is_paused:
+            self._runtime.resume_listening(reason="User toggled pause/resume in tray")
+            if self._tray:
+                self._tray.set_paused_state(False)
+        else:
+            self._runtime.pause_listening(reason="User toggled pause/resume in tray")
             if self._tray:
                 self._tray.set_paused_state(True)
 

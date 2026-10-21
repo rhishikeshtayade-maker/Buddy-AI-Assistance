@@ -289,7 +289,11 @@ class DesktopRuntime:
             )
             stt = SpeechRecognitionSTTProvider()
             tts = Pyttsx3TTSProvider()
-            wake_detector = KeywordWakeWordDetector(stt_provider=stt, wake_word=self._config.wake_word)
+            wake_detector = KeywordWakeWordDetector(
+                stt_provider=stt,
+                wake_word=self._config.wake_word,
+                allow_direct_commands=True,
+            )
 
         # Metered tap for HUD waveform
         self._metered_capture = MeteredAudioCapture(base_capture)
@@ -336,7 +340,7 @@ class DesktopRuntime:
                 if self._state_machine.current_state != BuddyState.IDLE:
                     recover_state_to_idle(self._state_machine, "Standby reset for wake detection")
 
-                # Listen for wake word (e.g. "hey buddy") with a bounded timeout
+                # Listen for wake word (e.g. "hey buddy") or direct command with bounded timeout
                 detected = await self._pipeline.listen_for_wake_word(timeout=5.0)
 
                 if self._stop_requested.is_set() or self._is_paused:
@@ -346,15 +350,23 @@ class DesktopRuntime:
                     consecutive_failures = 0
                     backoff_delay = 1.0
 
-                    # Acknowledge prompt
-                    if self._settings.sound_enabled:
-                        try:
-                            await self._pipeline.speak("I'm listening.")
-                        except Exception:
-                            pass
+                    wake_transcript = self._pipeline.last_wake_transcript or ""
+                    inline_command = self._extract_inline_command(wake_transcript)
 
-                    # Command turn
-                    await self._handle_active_turn()
+                    if inline_command:
+                        # User spoke command in the same utterance (e.g. "hey buddy open notepad" or "open notepad")
+                        logger.info("Executing voice command: '%s'", inline_command)
+                        await self._execute_voice_command(inline_command)
+                    else:
+                        # User only spoke the wake word (e.g. "hey buddy") -> Acknowledge and listen for command
+                        if self._settings.sound_enabled:
+                            try:
+                                await self._pipeline.speak("I'm listening.")
+                            except Exception:
+                                pass
+
+                        # Command turn
+                        await self._handle_active_turn()
 
                 # Cooperative yield
                 await asyncio.sleep(0.05)
@@ -378,6 +390,31 @@ class DesktopRuntime:
                 # Exponential backoff capped at 10.0 seconds
                 backoff_delay = min(10.0, backoff_delay * 1.5)
 
+    def _extract_inline_command(self, transcript: str) -> Optional[str]:
+        """Extract actionable command text from a wake utterance if present."""
+        if not transcript:
+            return None
+        text_clean = transcript.strip()
+        text_lower = text_clean.lower()
+        wake_phrase = self._config.wake_word.strip().lower()
+
+        # Check if wake phrase is present in transcript
+        idx = text_lower.find(wake_phrase)
+        if idx != -1:
+            remainder = text_clean[idx + len(wake_phrase):].strip(" ,.!?")
+            if remainder and len(remainder) > 1:
+                return remainder
+            return None
+
+        # If wake phrase not in transcript, check if the whole transcript is a recognized command
+        intent = self._router.classify(text_clean)
+        if intent.intent_type != VoiceIntentType.CONVERSATION or intent.direct_response is not None:
+            return text_clean
+        if any(p in text_lower for p in PAUSE_LISTENING_PATTERNS) or any(p in text_lower for p in EXIT_BUDDY_PATTERNS):
+            return text_clean
+
+        return None
+
     async def _handle_active_turn(self) -> None:
         """Perform a single command capture, routing, execution, and speech response."""
         try:
@@ -388,13 +425,20 @@ class DesktopRuntime:
                 return
 
             transcript = listen_res.transcript.strip()
-            self._bridge.set_conversation_turn(transcript=transcript, response=None)
+            await self._execute_voice_command(transcript)
+        finally:
+            recover_state_to_idle(self._state_machine, "Turn finalized")
+            self._bridge.emit_update()
 
+    async def _execute_voice_command(self, transcript: str) -> None:
+        """Process and execute an already transcribed voice command."""
+        self._bridge.set_conversation_turn(transcript=transcript, response=None)
+        try:
             # 1. Check for pause listening voice command
             transcript_lower = transcript.lower().rstrip(".!? ")
             if any(p in transcript_lower for p in PAUSE_LISTENING_PATTERNS):
                 await self.pause_listening(reason="Voice command 'stop listening'")
-                if self._settings.sound_enabled:
+                if self._settings.sound_enabled and self._pipeline:
                     await self._pipeline.speak("I've stopped listening. Click resume or use the tray to wake me.")
                 return
 
@@ -420,9 +464,8 @@ class DesktopRuntime:
             self._bridge.set_conversation_turn(transcript=transcript, response=response_text)
 
             # 5. Speak response with barge-in support
-            if self._settings.sound_enabled:
+            if self._settings.sound_enabled and self._pipeline:
                 await self._pipeline.speak(response_text, interruptible=True, barge_in=True)
-
         finally:
             recover_state_to_idle(self._state_machine, "Turn finalized")
             self._bridge.emit_update()
@@ -498,34 +541,19 @@ class DesktopRuntime:
 
         self._bridge.set_mic_paused(False)
 
+    def trigger_listen_turn(self) -> None:
+        """Explicitly trigger an active voice command listening turn (push-to-talk from HUD)."""
+        if self._is_paused:
+            self.resume_listening(reason="User triggered listen turn")
+        if self._loop and self._loop.is_running():
+            asyncio.run_coroutine_threadsafe(self._handle_active_turn(), self._loop)
+
     def submit_user_text(self, text: str) -> None:
         """Inject user text directly into the processing pipeline (GUI chat / text input)."""
         if not text or not text.strip():
             return
         if self._loop and self._loop.is_running():
-            asyncio.run_coroutine_threadsafe(self._execute_text_turn(text.strip()), self._loop)
-
-    async def _execute_text_turn(self, text: str) -> None:
-        """Execute a text-based user turn."""
-        self._bridge.set_conversation_turn(transcript=text, response=None)
-        try:
-            intent = self._router.classify(text)
-            response_text = await dispatch_voice_intent(
-                intent=intent,
-                tool_executor=self._tool_executor,
-                memory_manager=self._memory_manager,
-                conv_manager=self._conv_manager,
-                state_machine=self._state_machine,
-                confirm=self._confirm_callback,
-                on_status=self._bridge.set_action_status,
-            )
-            self._bridge.set_conversation_turn(transcript=text, response=response_text)
-
-            if self._settings.sound_enabled and self._pipeline:
-                await self._pipeline.speak(response_text, interruptible=True)
-        finally:
-            recover_state_to_idle(self._state_machine, "Text turn finalized")
-            self._bridge.emit_update()
+            asyncio.run_coroutine_threadsafe(self._execute_voice_command(text.strip()), self._loop)
 
     def update_settings(self, new_settings: DesktopSettings) -> None:
         """Apply and persist updated desktop settings."""

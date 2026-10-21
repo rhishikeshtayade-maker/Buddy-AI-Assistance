@@ -217,5 +217,12 @@ async def dispatch_voice_intent(
     if intent.direct_response:
         return intent.direct_response
 
-    response = await conv_manager.process_user_turn(intent.normalized_text, voice_response=False)
-    return response.content
+    if conv_manager is not None:
+        try:
+            response = await conv_manager.process_user_turn(intent.normalized_text, voice_response=False)
+            return response.content
+        except Exception as e:
+            logger.warning("Conversational AI processing error: %s", e)
+            return f"I heard you say: '{intent.normalized_text}'. How else can I assist you?"
+
+    return f"I heard you say: '{intent.normalized_text}'."

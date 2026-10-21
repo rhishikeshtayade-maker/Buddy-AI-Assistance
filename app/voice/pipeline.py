@@ -140,6 +140,13 @@ class VoicePipeline:
         return self._wake_word
 
     @property
+    def last_wake_transcript(self) -> Optional[str]:
+        """Return the transcript associated with the most recent wake word detection, if available."""
+        if hasattr(self._wake_word, "last_transcript"):
+            return self._wake_word.last_transcript
+        return None
+
+    @property
     def device_manager(self) -> AudioDeviceManager:
         return self._device_manager
 
