@@ -131,3 +131,102 @@ class TestDesktopUI(unittest.TestCase):
 
         tray._handle_pause_resume()
         self.assertEqual(len(pause_calls), 1)
+
+    def test_settings_dialog_opacity_and_flags(self) -> None:
+        """Verify Preferences dialog is 100% opaque, stays on top, and centers on screen."""
+        hud = GlassHudWindow(self.settings)
+        dialog = SettingsDialog(settings=self.settings, parent=hud)
+
+        # Dialog ownership
+        self.assertIs(dialog.parent(), hud, "Preferences dialog must be owned by the main HUD window")
+
+        # WA_TranslucentBackground MUST be False for Preferences (no HUD bleed-through)
+        self.assertFalse(
+            dialog.testAttribute(Qt.WidgetAttribute.WA_TranslucentBackground),
+            "Preferences dialog must NOT have WA_TranslucentBackground set",
+        )
+        self.assertTrue(dialog.testAttribute(Qt.WidgetAttribute.WA_StyledBackground))
+        self.assertTrue(dialog.autoFillBackground())
+        self.assertEqual(dialog.windowOpacity(), 1.0)
+
+        # Must have Dialog and WindowStaysOnTopHint flags
+        flags = dialog.windowFlags()
+        self.assertTrue(flags & Qt.WindowType.Dialog)
+        self.assertTrue(flags & Qt.WindowType.WindowStaysOnTopHint)
+
+        # Centering on screen
+        dialog.center_on_screen()
+        self.assertGreaterEqual(dialog.x(), 0)
+        self.assertGreaterEqual(dialog.y(), 0)
+
+    def test_settings_dialog_zero_transparency_bleed_through(self) -> None:
+        """Verify rendered Preferences dialog has 100% opaque background with zero translucency."""
+        hud = GlassHudWindow(self.settings)
+        dialog = SettingsDialog(settings=self.settings, parent=hud)
+        dialog.show()
+
+        pixmap = dialog.grab()
+        image = pixmap.toImage()
+
+        # Sample dialog corners, edges, and inner card to confirm alpha is strictly 255
+        sample_points = [
+            (2, 2),
+            (dialog.width() - 3, 2),
+            (2, dialog.height() - 3),
+            (dialog.width() - 3, dialog.height() - 3),
+            (dialog.width() // 2, dialog.height() // 2),
+            (20, 20),
+        ]
+        for sx, sy in sample_points:
+            color = image.pixelColor(sx, sy)
+            self.assertEqual(color.alpha(), 255, f"Pixel at ({sx}, {sy}) must be fully opaque (alpha=255)")
+
+        dialog.close()
+
+    def test_hud_update_settings_applies_opacity_and_fallback(self) -> None:
+        """Verify that updating settings applies new opacity and force_opaque immediately."""
+        hud = GlassHudWindow(self.settings)
+        hud.show_hud()
+
+        # Update opacity to 0.65
+        new_settings = self.settings.model_copy(update={"hud_opacity": 0.65, "force_opaque": False})
+        hud.update_settings(new_settings)
+        self.assertAlmostEqual(hud.windowOpacity(), 0.65, places=2)
+
+        # Force opaque should override to 1.0
+        opaque_settings = self.settings.model_copy(update={"hud_opacity": 0.65, "force_opaque": True})
+        hud.update_settings(opaque_settings)
+        self.assertEqual(hud.windowOpacity(), 1.0)
+
+    def test_settings_dialog_duplicate_prevention_and_hud_continuity(self) -> None:
+        """Verify repeated calls reuse active dialog and HUD remains fully functional after closing."""
+        from app.desktop.app import BuddyDesktopApp
+        from app.desktop.single_instance import SingleInstanceGuard
+        import uuid
+
+        guard = SingleInstanceGuard(name=f"test-app-settings-{uuid.uuid4().hex[:8]}")
+        app = BuddyDesktopApp(use_mock_voice=True, guard=guard)
+        app._hud = GlassHudWindow(self.settings)
+        app._hud.show_hud()
+
+        self.assertIsNone(app._settings_dialog)
+
+        # Open settings first time
+        app._handle_open_settings()
+        self.assertIsNotNone(app._settings_dialog)
+        first_dialog = app._settings_dialog
+        self.assertTrue(first_dialog.isVisible())
+
+        # Open settings second time while first is still visible -> reused
+        app._handle_open_settings()
+        self.assertIs(app._settings_dialog, first_dialog, "Must reuse active dialog instead of creating duplicate")
+
+        # Close dialog -> reference cleared and HUD remains active
+        first_dialog.close()
+        self.assertIsNone(app._settings_dialog)
+        self.assertTrue(app._hud.isVisible(), "Main HUD must remain functional after Preferences closes")
+
+        app._hud.close()
+        app._hud.deleteLater()
+        guard.release()
+

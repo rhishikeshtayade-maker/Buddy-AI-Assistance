@@ -73,6 +73,7 @@ class BuddyDesktopApp:
         self._hud: Optional[GlassHudWindow] = None
         self._tray: Optional[BuddySystemTray] = None
         self._runtime: Optional[DesktopRuntime] = None
+        self._settings_dialog: Optional[SettingsDialog] = None
         self._confirm_bridge = ConfirmationBridge()
 
     def run(self) -> int:
@@ -184,14 +185,34 @@ class BuddyDesktopApp:
             self._runtime.submit_user_text(text)
 
     def _handle_open_settings(self) -> None:
-        if not self._hud:
-            return
-        dialog = SettingsDialog(
+        # Avoid creating duplicate settings dialogs on repeated clicks
+        if self._settings_dialog is not None:
+            if self._settings_dialog.isVisible():
+                self._settings_dialog.raise_()
+                self._settings_dialog.activateWindow()
+                return
+            else:
+                try:
+                    self._settings_dialog.close()
+                except Exception:
+                    pass
+                self._settings_dialog = None
+
+        self._settings_dialog = SettingsDialog(
             settings=self._settings,
             parent=self._hud,
             on_save=self._on_settings_saved,
         )
-        dialog.exec()
+        self._settings_dialog.finished.connect(self._on_settings_closed)
+        self._settings_dialog.show()
+        self._settings_dialog.raise_()
+        self._settings_dialog.activateWindow()
+
+    def _on_settings_closed(self, result: int = 0) -> None:
+        self._settings_dialog = None
+        if self._hud and self._hud.isVisible():
+            self._hud.raise_()
+            self._hud.activateWindow()
 
     def _on_settings_saved(self, new_settings: DesktopSettings) -> None:
         self._settings = new_settings
@@ -216,6 +237,9 @@ class BuddyDesktopApp:
             self._qapp.quit()
 
     def _cleanup(self) -> None:
+        if self._settings_dialog:
+            self._settings_dialog.close()
+            self._settings_dialog = None
         if self._runtime and self._runtime.is_running:
             self._runtime.stop_and_join(timeout=5.0)
         if self._tray:

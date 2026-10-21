@@ -333,6 +333,8 @@ class GlassHudWindow(QWidget):
         self._settings = settings
         self._orb.set_intensity(settings.animation_intensity)
         self._waveform.set_intensity(settings.animation_intensity)
+        target_opacity = 1.0 if settings.force_opaque else settings.hud_opacity
+        self.setWindowOpacity(target_opacity)
         self.reposition(settings.hud_position)
         self.update()
 
@@ -387,7 +389,7 @@ class GlassHudWindow(QWidget):
 
     def show_hud(self) -> None:
         """Smoothly fade-in HUD without stealing focus."""
-        target_opacity = self._settings.hud_opacity
+        target_opacity = 1.0 if self._settings.force_opaque else self._settings.hud_opacity
         self.setWindowOpacity(0.0)
         self.show()
         if self._settings.animation_intensity != AnimationIntensity.OFF:

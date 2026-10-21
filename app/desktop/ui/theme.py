@@ -115,6 +115,11 @@ class Theme:
     BG_CARD_HOVER = QColor(32, 40, 60, 210)
     BG_INPUT = QColor(10, 14, 22, 220)
 
+    # Fully opaque background colors (for dialogs & fallback mode)
+    BG_OPAQUE_BASE = QColor(14, 18, 27, 255)       # #0e121b
+    BG_OPAQUE_SURFACE = QColor(22, 28, 42, 255)    # #161c2a
+    BG_OPAQUE_ELEVATED = QColor(30, 38, 56, 255)   # #1e2638
+
     # Glass border
     BORDER_SUBTLE = QColor(255, 255, 255, 28)
     BORDER_ACTIVE = QColor(0, 210, 255, 90)

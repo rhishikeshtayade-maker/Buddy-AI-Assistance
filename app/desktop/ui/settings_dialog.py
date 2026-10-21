@@ -10,6 +10,7 @@ from __future__ import annotations
 from typing import Callable, Optional
 
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QColor, QGuiApplication, QPainter
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -30,7 +31,7 @@ from app.desktop.ui.theme import Theme
 
 
 class SettingsDialog(QDialog):
-    """Custom glassmorphism settings dialog."""
+    """Fully opaque desktop preferences dialog."""
 
     def __init__(
         self,
@@ -44,24 +45,63 @@ class SettingsDialog(QDialog):
         self._on_save = on_save
         self._startup_mgr = startup_manager or LoginStartupManager()
 
-        self.setWindowTitle("BUDDY — Settings")
-        self.setFixedWidth(440)
-        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
-        self.setWindowFlags(Qt.WindowType.Dialog | Qt.WindowType.FramelessWindowHint)
+        self.setWindowTitle("BUDDY — Preferences")
+        self.setFixedWidth(460)
+
+        # Explicitly ensure window is 100% opaque (never translucent)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, False)
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        self.setAutoFillBackground(True)
+        self.setWindowOpacity(1.0)
+
+        # Independent window associated with BUDDY and elevated above on-top HUD
+        self.setWindowFlags(
+            Qt.WindowType.Dialog
+            | Qt.WindowType.WindowStaysOnTopHint
+        )
+
+        pal = self.palette()
+        pal.setColor(self.backgroundRole(), Theme.BG_OPAQUE_BASE)
+        self.setPalette(pal)
 
         self._setup_ui()
 
-    def _setup_ui(self) -> None:
-        main_layout = QVBoxLayout(self)
-        main_layout.setContentsMargins(12, 12, 12, 12)
+    def paintEvent(self, event) -> None:
+        """Paint solid opaque background guaranteeing zero transparency bleed-through."""
+        painter = QPainter(self)
+        painter.fillRect(self.rect(), Theme.BG_OPAQUE_BASE)
+        super().paintEvent(event)
 
-        # Container card
-        self._card = QFrame()
-        self._card.setStyleSheet("""
-            QFrame {
-                background-color: rgba(18, 24, 36, 245);
-                border: 1px solid rgba(0, 210, 255, 75);
-                border-radius: 16px;
+    def center_on_screen(self) -> None:
+        """Position dialog safely in the center of the available screen area to avoid HUD overlap."""
+        screen = None
+        if self.parentWidget() and self.parentWidget().window():
+            screen = self.parentWidget().window().screen()
+        if not screen:
+            screen = QGuiApplication.primaryScreen()
+        if screen:
+            geo = screen.availableGeometry()
+            dlg_size = self.sizeHint()
+            w = max(self.width(), dlg_size.width())
+            h = max(self.height(), dlg_size.height())
+            x = geo.x() + max(0, (geo.width() - w) // 2)
+            y = geo.y() + max(0, (geo.height() - h) // 2)
+            self.move(x, y)
+
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        self.center_on_screen()
+
+    def _setup_ui(self) -> None:
+        self.setStyleSheet("""
+            QDialog {
+                background-color: #0e121b;
+                color: #f5f8ff;
+            }
+            QFrame#SettingsCard {
+                background-color: #161c2a;
+                border: 1px solid #1e2638;
+                border-radius: 12px;
             }
             QLabel {
                 color: #f5f8ff;
@@ -71,19 +111,26 @@ class SettingsDialog(QDialog):
                 background: transparent;
             }
             QComboBox {
-                background-color: rgba(30, 38, 56, 220);
-                border: 1px solid rgba(255, 255, 255, 40);
+                background-color: #1e2638;
+                border: 1px solid #2d3748;
                 border-radius: 6px;
                 padding: 6px 12px;
                 color: #f5f8ff;
                 font-size: 9pt;
+            }
+            QComboBox QAbstractItemView {
+                background-color: #161c2a;
+                color: #f5f8ff;
+                selection-background-color: #00d2ff;
+                selection-color: #000000;
+                border: 1px solid #2d3748;
             }
             QComboBox::drop-down {
                 border: none;
             }
             QSlider::groove:horizontal {
                 height: 6px;
-                background: rgba(255, 255, 255, 40);
+                background: #2d3748;
                 border-radius: 3px;
             }
             QSlider::sub-page:horizontal {
@@ -107,14 +154,21 @@ class SettingsDialog(QDialog):
                 width: 18px;
                 height: 18px;
                 border-radius: 4px;
-                border: 1px solid rgba(255, 255, 255, 50);
-                background: rgba(30, 38, 56, 180);
+                border: 1px solid #4a5568;
+                background: #1e2638;
             }
             QCheckBox::indicator:checked {
                 background: #00d2ff;
                 border: 1px solid #00d2ff;
             }
         """)
+
+        main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(14, 14, 14, 14)
+
+        # Solid container card
+        self._card = QFrame()
+        self._card.setObjectName("SettingsCard")
 
         card_layout = QVBoxLayout(self._card)
         card_layout.setContentsMargins(20, 20, 20, 20)
@@ -131,14 +185,15 @@ class SettingsDialog(QDialog):
         close_btn.setFixedSize(28, 28)
         close_btn.setStyleSheet("""
             QPushButton {
-                background: rgba(255, 255, 255, 20);
+                background: #1e2638;
                 color: #f5f8ff;
                 border-radius: 14px;
                 font-size: 11pt;
-                border: none;
+                border: 1px solid #2d3748;
             }
             QPushButton:hover {
-                background: rgba(255, 77, 109, 180);
+                background: #e53e3e;
+                border: 1px solid #e53e3e;
             }
         """)
         close_btn.clicked.connect(self.reject)
@@ -213,14 +268,14 @@ class SettingsDialog(QDialog):
         cancel_btn = QPushButton("Cancel")
         cancel_btn.setStyleSheet("""
             QPushButton {
-                background: rgba(255, 255, 255, 25);
+                background: #1e2638;
                 color: #f5f8ff;
                 padding: 6px 16px;
                 border-radius: 6px;
-                border: none;
+                border: 1px solid #2d3748;
             }
             QPushButton:hover {
-                background: rgba(255, 255, 255, 45);
+                background: #2d3748;
             }
         """)
         cancel_btn.clicked.connect(self.reject)
